@@ -189,15 +189,21 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
       ui.cancelButton.disabled = true
       ui.textarea.disabled = true
       ui.submitButton.textContent = "Sending"
+      // Fades in place rather than sliding off to the right. The composer is
+      // anchored to the pill now, so a slide to the screen edge came from
+      // nowhere and went nowhere; a dissolve hands off to the toast that
+      // replaces it.
       requestAnimationFrame(() => {
-        ui.panel.style.transform = "translateX(calc(100% + 40px))"
+        ui.panel.style.transform = "translateY(-4px)"
         ui.panel.style.opacity = "0"
         ui.box.style.opacity = "0"
       })
+      // Outlasts the CSS transition, so the panel is gone rather than snapping
+      // away half-faded.
       setTimeout(() => {
         ui.host.remove()
         resolve(resultPayload)
-      }, 240)
+      }, 280)
     }
 
     // Position after display: an undisplayed panel measures zero, which would

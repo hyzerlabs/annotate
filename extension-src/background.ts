@@ -254,92 +254,109 @@ async function startAnnotationMode(
   const picked = await runAnnotationPicker(tab.id, mode)
   if (!picked || picked.cancelled === true) return { cancelled: true }
 
+  // The pill is hidden for the capture and deliberately stays hidden until the
+  // toast is ready, so it comes back WITH the confirmation rather than blinking
+  // back on its own first. Two separate reappearances read as a flash.
+  let pillHidden = false
+  const restorePill = async () => {
+    if (!pillHidden) return
+    pillHidden = false
+    await setConnectionOverlayHidden(tab.id!, false)
+  }
+
   let screenshot: AnnotationScreenshot | null = null
-  if (picked.includeScreenshot) {
-    logExtension("Capturing annotation screenshot", { tabId: tab.id, windowId: tab.windowId, mode })
-    // Our own pill would otherwise land in every shot.
-    await setConnectionOverlayHidden(tab.id, true)
-    try {
+
+  try {
+    if (picked.includeScreenshot) {
+      logExtension("Capturing annotation screenshot", { tabId: tab.id, windowId: tab.windowId, mode })
+      // Our own pill would otherwise land in every shot.
+      pillHidden = true
+      await setConnectionOverlayHidden(tab.id, true)
       screenshot =
         mode === "page" || !picked.element
           ? await captureFullPage(tab)
           : await captureElement(tab, picked.element, picked.viewport)
-    } finally {
-      await setConnectionOverlayHidden(tab.id, false)
-    }
-    logExtension("Captured annotation screenshot", {
-      tabId: tab.id,
-      mode: screenshot.mode,
-      cropped: screenshot.cropped,
-      truncated: screenshot.truncated,
-      bytesApprox: Math.round((screenshot.dataUrl.length * 3) / 4),
-    })
-  } else {
-    logExtension("Screenshot skipped by user", { tabId: tab.id, mode })
-  }
-
-  const annotationPayload: AnnotationPayload = {
-    comment: picked.comment || "",
-    mode,
-    page: {
-      url: tab.url || "",
-      title: tab.title || "",
-    },
-    element: picked.element,
-    viewport: picked.viewport,
-    screenshot,
-  }
-
-  logExtension("Sending annotation upstream", {
-    tabId: tab.id,
-    selector: picked.element?.selector,
-    commentLength: annotationPayload.comment.length,
-  })
-
-  const claim = claimedTabs.get(tab.id)
-  if (!claim?.baseUrl || !claim?.sessionId) {
-    throw new Error("Tab is not connected to an annotation server")
-  }
-
-  const annotationResponse = await postJson<{ sessionId?: string; queued?: number }>(
-    claim.baseUrl,
-    "/annotation",
-    {
-      ...claimRequestBody(tab.id, claim.sessionId),
-      annotation: annotationPayload,
-    }
-  )
-
-  logExtension("Annotation accepted by annotation server", {
-    tabId: tab.id,
-    baseUrl: claim.baseUrl,
-    sessionId: annotationResponse?.sessionId,
-    queued: annotationResponse?.queued,
-  })
-
-  // Confirmed only once the server has it. The composer slides away as soon as
-  // you submit, so without this the sole evidence anything happened is the
-  // counter ticking — and nothing at all distinguishes "sent" from "silently
-  // failed on the way out".
-  const queued = Number(annotationResponse?.queued)
-  await showToast(tab.id, {
-    title: mode === "page" ? "Page comment sent" : "Annotation sent",
-    body: Number.isFinite(queued) ? `${queued} waiting for the agent` : undefined,
-    intent: "success",
-    durationMs: 3400,
-  }).catch(() => {})
-
-  if (Number.isFinite(queued)) {
-    await Promise.allSettled(
-      Array.from(claimedTabs.entries()).map(async ([claimedTabId, claimed]) => {
-        if (claimed.baseUrl !== claim.baseUrl) return
-        claimedTabs.set(claimedTabId, { ...claimed, queued })
-        await setConnectionOverlayQueue(claimedTabId, queued)
+      logExtension("Captured annotation screenshot", {
+        tabId: tab.id,
+        mode: screenshot.mode,
+        cropped: screenshot.cropped,
+        truncated: screenshot.truncated,
+        bytesApprox: Math.round((screenshot.dataUrl.length * 3) / 4),
       })
-    )
-  }
+    } else {
+      logExtension("Screenshot skipped by user", { tabId: tab.id, mode })
+    }
 
-  return { cancelled: false }
+    const annotationPayload: AnnotationPayload = {
+      comment: picked.comment || "",
+      mode,
+      page: {
+        url: tab.url || "",
+        title: tab.title || "",
+      },
+      element: picked.element,
+      viewport: picked.viewport,
+      screenshot,
+    }
+
+    logExtension("Sending annotation upstream", {
+      tabId: tab.id,
+      selector: picked.element?.selector,
+      commentLength: annotationPayload.comment.length,
+    })
+
+    const claim = claimedTabs.get(tab.id)
+    if (!claim?.baseUrl || !claim?.sessionId) {
+      throw new Error("Tab is not connected to an annotation server")
+    }
+
+    const annotationResponse = await postJson<{ sessionId?: string; queued?: number }>(
+      claim.baseUrl,
+      "/annotation",
+      {
+        ...claimRequestBody(tab.id, claim.sessionId),
+        annotation: annotationPayload,
+      }
+    )
+
+    logExtension("Annotation accepted by annotation server", {
+      tabId: tab.id,
+      baseUrl: claim.baseUrl,
+      sessionId: annotationResponse?.sessionId,
+      queued: annotationResponse?.queued,
+    })
+
+    // Confirmed only once the server has it, so it reports delivery rather than
+    // intent. Restored alongside the toast so the pill returning and the
+    // confirmation arriving are a single moment.
+    const queued = Number(annotationResponse?.queued)
+    await Promise.all([
+      showToast(tab.id, {
+        title: mode === "page" ? "Page comment sent" : "Annotation sent",
+        body: Number.isFinite(queued) ? `${queued} waiting for the agent` : undefined,
+        intent: "success",
+        durationMs: 2500,
+      }).catch(() => {}),
+      restorePill().catch(() => {}),
+    ])
+
+    if (Number.isFinite(queued)) {
+      await Promise.allSettled(
+        Array.from(claimedTabs.entries()).map(async ([claimedTabId, claimed]) => {
+          if (claimed.baseUrl !== claim.baseUrl) return
+          claimedTabs.set(claimedTabId, { ...claimed, queued })
+          await setConnectionOverlayQueue(claimedTabId, queued)
+        })
+      )
+    }
+
+    return { cancelled: false }
+  } finally {
+    // Idempotent, so this is a no-op on the success path. It exists so that no
+    // failure between hiding the pill and showing the toast can leave the pill
+    // invisible with no way to get it back.
+    await restorePill()
+  }
 }
 
 chrome.tabs.onRemoved.addListener((tabId) => {
