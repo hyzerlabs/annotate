@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./dist/server.js",
   "bin": {
-    "hyzer-annotate": "./dist/server.js"
+    "hyzer-annotate": "dist/server.js"
   },
   "files": [
     "dist",
