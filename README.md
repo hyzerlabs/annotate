@@ -4,6 +4,8 @@ Click an element in your browser, type what's wrong with it, and your coding age
 
 Works with any agent that speaks MCP. Nothing leaves your machine.
 
+![The connection pill and the annotate composer over a selected heading, with the element's selector filled in](docs/ui-crop.png)
+
 ## How it works
 
 The MCP server binds a port on `127.0.0.1` (39280-39300) when your agent starts it. The extension scans that range to find running sessions, you connect a tab to one, and each annotation you submit is POSTed to that session's server. The agent drains the queue when you ask it to.
@@ -75,6 +77,8 @@ $ARGUMENTS
 ```
 
 Then `/fb` drains and acts, or `/fb just summarize, don't edit` to steer it.
+
+![Claude Code with /fb typed at the prompt, showing the command's description](docs/agent1.png)
 
 ## Use
 
