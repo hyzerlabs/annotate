@@ -1,12 +1,15 @@
-import { copyFileSync, mkdirSync, readdirSync, rmSync, unlinkSync, existsSync } from "node:fs"
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
-import { spawnSync } from "node:child_process"
 import { build } from "esbuild"
+
+const ICON_SIZES = [16, 48, 128]
 
 const root = resolve(process.cwd())
 const sourceDir = join(root, "extension-src")
 const outputDir = join(root, "extension")
-const iconSvg = join(root, "icon.svg")
+const iconDir = join(root, "icons")
+
+const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
 
 mkdirSync(outputDir, { recursive: true })
 for (const entry of readdirSync(outputDir, { withFileTypes: true })) {
@@ -16,20 +19,21 @@ rmSync(join(outputDir, "injected"), { recursive: true, force: true })
 mkdirSync(join(outputDir, "injected"), { recursive: true })
 mkdirSync(join(outputDir, "icons"), { recursive: true })
 
-copyFileSync(join(sourceDir, "manifest.json"), join(outputDir, "manifest.json"))
+// One version, from package.json. The Chrome Web Store rejects re-uploading a
+// version it already has, and a hand-maintained second copy in the manifest is
+// exactly the sort of thing that gets forgotten on the release that matters.
+const manifest = JSON.parse(readFileSync(join(sourceDir, "manifest.json"), "utf8"))
+manifest.version = pkg.version
+writeFileSync(join(outputDir, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`)
 
-// sips is macOS-only; skip icon generation elsewhere rather than fail the build.
-if (process.platform === "darwin") {
-  for (const size of [16, 48, 128]) {
-    const icon = spawnSync(
-      "sips",
-      ["-s", "format", "png", "-z", String(size), String(size), iconSvg, "--out", join(outputDir, "icons", `icon${size}.png`)],
-      { cwd: root, stdio: "inherit" }
-    )
-    if (icon.status !== 0) process.exit(icon.status ?? 1)
-  }
-} else if (!existsSync(join(outputDir, "icons", "icon16.png"))) {
-  console.warn("Skipping icon generation (needs macOS sips). Extension icons will be missing.")
+// Icons are committed rather than generated here — see scripts/generate-icons.mjs.
+const missing = ICON_SIZES.filter((size) => !existsSync(join(iconDir, `icon${size}.png`)))
+if (missing.length) {
+  console.error(`Missing icons: ${missing.map((s) => `icons/icon${s}.png`).join(", ")}. Run "npm run icons" on macOS.`)
+  process.exit(1)
+}
+for (const size of ICON_SIZES) {
+  copyFileSync(join(iconDir, `icon${size}.png`), join(outputDir, "icons", `icon${size}.png`))
 }
 
 await build({
@@ -44,3 +48,5 @@ await build({
   // it never reaches the annotated page's stylesheets.
   loader: { ".css": "text" },
 })
+
+console.log(`extension: built ${manifest.name} v${manifest.version}`)

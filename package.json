@@ -16,6 +16,9 @@
     "build": "esbuild src/server.ts --outfile=dist/server.js --platform=node --format=esm --packages=external --banner:js=\"#!/usr/bin/env node\"",
     "build:extension": "node scripts/build-extension.mjs",
     "build:all": "npm run build && npm run build:extension",
+    "icons": "node scripts/generate-icons.mjs",
+    "package:extension": "node scripts/build-extension-zip.mjs",
+    "prepublishOnly": "npm run check",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node test/geometry.mjs && node test/token-scope.mjs && node test/smoke.mjs",
     "check": "npm run typecheck && npm run test && npm run build:extension"

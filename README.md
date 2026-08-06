@@ -94,6 +94,22 @@ The pill hides itself during capture so it stays out of the shot. Two things wor
 npm run check   # typecheck + smoke test + extension build
 ```
 
+### Packaging
+
+```sh
+npm run icons              # regenerate icons/*.png from icon.svg (macOS only)
+npm run package:extension  # build + zip into release/ for the Chrome Web Store
+```
+
+The extension's version comes from `package.json` and is stamped into the
+manifest at build time — `extension-src/manifest.json` deliberately has no
+`version` field, so there is no second copy to forget on a release.
+
+Icons are committed under `icons/` rather than generated during the build.
+Rasterizing needs `sips`, which is macOS-only, so a build that generated them
+would quietly ship an iconless extension on Linux and in CI. `npm run
+build:extension` fails outright if they are missing.
+
 `npm test` runs two checks. `test/geometry.mjs` covers the capture arithmetic — crop clamping, zoom scaling, band planning, stitch height. `test/smoke.mjs` boots the server and exercises the HTTP contract the extension depends on — discovery, claiming, screenshot decoding, queueing, input rejection — then drains the queue over MCP to check both annotation shapes format correctly.
 
 ## License

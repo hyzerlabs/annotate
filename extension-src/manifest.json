@@ -2,7 +2,6 @@
   "manifest_version": 3,
   "name": "hyzer-annotate",
   "short_name": "hyzer-annotate",
-  "version": "0.1.0",
   "description": "Annotate any page and send the element, screenshot, and your comment to your local coding agent",
   "homepage_url": "https://github.com/hyzerlabs/hyzer-annotate",
   "permissions": [
