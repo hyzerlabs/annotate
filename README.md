@@ -12,19 +12,14 @@ There's one server process per agent session, so the session picker lists one en
 
 ## Setup
 
-```sh
-npm install
-npm run build:all
-```
+Two halves: the MCP server your agent talks to, and the browser extension. The server comes from npm. The extension has to be built from source for now, since it isn't in the Chrome Web Store yet.
 
-**Load the extension:** open `brave://extensions` (or `chrome://extensions`), enable Developer mode, click "Load unpacked", and select the `extension/` directory.
-
-**Register the MCP server** with your agent, pointing at the absolute path of `dist/server.js`.
+### The MCP server
 
 For Claude Code, register it once at user scope so it's available in every project you annotate:
 
 ```sh
-claude mcp add hyzer-annotate --scope user -- node /absolute/path/to/hyzer-annotate/dist/server.js
+claude mcp add hyzer-annotate --scope user -- npx -y @hyzer-labs/annotate
 ```
 
 Or per-project, in that project's `.mcp.json`:
@@ -33,8 +28,8 @@ Or per-project, in that project's `.mcp.json`:
 {
   "mcpServers": {
     "hyzer-annotate": {
-      "command": "node",
-      "args": ["/absolute/path/to/hyzer-annotate/dist/server.js"]
+      "command": "npx",
+      "args": ["-y", "@hyzer-labs/annotate"]
     }
   }
 }
@@ -43,6 +38,19 @@ Or per-project, in that project's `.mcp.json`:
 User scope is usually the better choice. Each agent process binds its own port and the extension discovers whichever ones are running, so registering it globally costs nothing and saves you repeating this per repo.
 
 Restart the agent after adding it.
+
+`npx` caches by version, so it will keep running whatever it first fetched. Pin with `@hyzer-labs/annotate@latest` if you'd rather it check each time, or install it globally (`npm i -g @hyzer-labs/annotate`) and register the `hyzer-annotate` binary directly.
+
+### The extension
+
+```sh
+git clone https://github.com/hyzerlabs/annotate.git
+cd annotate
+npm install
+npm run build:extension
+```
+
+Open `brave://extensions` (or `chrome://extensions`), enable Developer mode, click "Load unpacked", and select the `extension/` directory.
 
 ### Optional: a `/fb` shortcut
 
