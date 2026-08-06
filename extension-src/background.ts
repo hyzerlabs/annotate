@@ -284,10 +284,17 @@ async function startAnnotationMode(
             }
           : null
       pillHidden = await hideOverlayForCapture(tab.id, captureRegion)
-      screenshot =
-        mode === "page" || !picked.element
-          ? await captureFullPage(tab)
-          : await captureElement(tab, picked.element, picked.viewport)
+      try {
+        screenshot =
+          mode === "page" || !picked.element
+            ? await captureFullPage(tab)
+            : await captureElement(tab, picked.element, picked.viewport)
+      } finally {
+        // The moment the shutter closes. Holding it hidden until the toast made
+        // the window several hundred milliseconds longer for no benefit — the
+        // toast is not what the eye is tracking while the pill is missing.
+        await restorePill()
+      }
       logExtension("Captured annotation screenshot", {
         tabId: tab.id,
         mode: screenshot.mode,
@@ -343,15 +350,12 @@ async function startAnnotationMode(
     // intent. Restored alongside the toast so the pill returning and the
     // confirmation arriving are a single moment.
     const queued = Number(annotationResponse?.queued)
-    await Promise.all([
-      showToast(tab.id, {
-        title: mode === "page" ? "Page comment sent" : "Annotation sent",
-        body: Number.isFinite(queued) ? `${queued} waiting for the agent` : undefined,
-        intent: "success",
-        durationMs: 2500,
-      }).catch(() => {}),
-      restorePill().catch(() => {}),
-    ])
+    await showToast(tab.id, {
+      title: mode === "page" ? "Page comment sent" : "Annotation sent",
+      body: Number.isFinite(queued) ? `${queued} waiting for the agent` : undefined,
+      intent: "success",
+      durationMs: 2500,
+    }).catch(() => {})
 
     if (Number.isFinite(queued)) {
       await Promise.allSettled(
