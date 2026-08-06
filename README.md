@@ -8,7 +8,7 @@ Works with any agent that speaks MCP. Nothing leaves your machine.
 
 The MCP server binds a port on `127.0.0.1` (39280-39300) when your agent starts it. The extension scans that range to find running sessions, you connect a tab to one, and each annotation you submit is POSTed to that session's server. The agent drains the queue when you ask it to.
 
-One server process per agent session, so the extension's session picker lists one entry per running agent.
+There's one server process per agent session, so the session picker lists one entry per running agent.
 
 ## Setup
 
@@ -40,11 +40,13 @@ Or per-project, in that project's `.mcp.json`:
 }
 ```
 
-User scope is usually what you want — the server binds a port per agent process and the extension discovers whichever ones are running, so registering it everywhere costs nothing and saves you doing this per repo.
+User scope is usually the better choice. Each agent process binds its own port and the extension discovers whichever ones are running, so registering it globally costs nothing and saves you repeating this per repo.
 
 Restart the agent after adding it.
 
-**Optional — a shortcut to drain the queue.** Anything like "check annotations" works, but a slash command is shorter. Put this in `~/.claude/commands/fb.md` (user scope, matching the server above):
+### Optional: a `/fb` shortcut
+
+Asking your agent to "check annotations" works fine. A slash command is shorter. Save this as `~/.claude/commands/fb.md`:
 
 ```markdown
 ---
@@ -69,56 +71,62 @@ Then `/fb` drains and acts, or `/fb just summarize, don't edit` to steer it.
 ## Use
 
 1. Click the extension icon and connect the tab to your agent session.
-2. In the in-page pill, either:
+2. In the in-page pill, choose either:
    - **Annotate** — click the element you want to talk about, then comment on it.
    - **Capture** — comment on the page as a whole, no element picking.
 3. Submit. Repeat as many times as you like.
-4. Tell your agent to check the annotations (or `/fb`, if you added the command above). It calls `get_annotations`, which drains everything you've queued.
+4. Tell your agent to check the annotations, or run `/fb` if you added the command above. Either way it calls `get_annotations`, which drains everything you've queued.
 
-Use the **×** in the pill to disconnect the tab. It also disconnects on its own when you close the tab, navigate to a different origin, or the agent stops.
+There's no "send" step to remember. Every annotation POSTs the moment you submit it, and the agent collects the whole queue in one call.
 
-Batching is on the receiving end: every annotation POSTs immediately, and the agent picks up the whole queue in one call. There's no "send" step to remember.
-
-## Keeping the queue across restarts
-
-The queue lives in memory, so restarting your agent normally discards anything you haven't asked it to read yet. **Keep queue across restarts** in the pill writes it to the runtime directory instead, and the setting itself is stored there too — a toggle that reset on restart would forget exactly when it mattered.
-
-It's off by default, applies to every project (it's a user preference, not a per-repo one), and the saved copy is discarded as soon as the agent drains the queue. Set `HYZER_ANNOTATE_DIR` to move the runtime directory; the tests use it to avoid touching your real settings.
+Use the **×** in the pill to disconnect the tab. It also disconnects on its own when you close the tab, navigate to a different origin, or stop the agent.
 
 ## Screenshots
 
-Every annotation carries one, unless you clear the **Include screenshot** box in the composer. **Annotate** crops to the element you picked (plus a little padding for context); **Capture** stitches the whole scrollable page from viewport captures. Either way the image is written to a temp directory and passed to the agent as a file path, so it reads the image only when it needs to.
+Every annotation carries one unless you clear **Include screenshot** in the composer. **Annotate** crops to the element you picked, with a little padding for context. **Capture** stitches the whole scrollable page together from viewport captures. Either way the image is written to a temp directory and handed to the agent as a file path, so it only loads the image when it needs to.
 
-Images are swept once they are more than six hours old — not when the queue drains, because the agent reads those paths *after* `get_annotations` returns. Anything still queued is never swept, however old.
+The pill hides itself during capture so it stays out of the shot.
 
-The pill hides itself during capture so it stays out of the shot. Two things worth knowing about full-page capture:
+Two things worth knowing about full-page capture:
 
-- `captureVisibleTab` is rate-limited to 2 calls/sec, so a tall page takes a beat — and stitching stops at 12 viewport-heights. The agent is told when a shot was truncated.
-- Fixed and sticky elements are hidden after the first band, otherwise a sticky header gets stamped into every strip. A sticky sidebar will leave a gap.
+- `captureVisibleTab` is rate-limited to 2 calls/sec, so a tall page takes a beat, and stitching stops at 12 viewport-heights. The agent is told when a shot was truncated.
+- Fixed and sticky elements are hidden after the first band. Otherwise a sticky header gets stamped into every strip. A sticky sidebar will leave a gap where it was.
+
+Images are swept once they're more than six hours old, rather than when the queue drains. The agent reads those paths *after* `get_annotations` returns, so deleting on drain would hand it dead paths. Anything still queued is never swept, however old it gets.
+
+## Keeping the queue across restarts
+
+The queue lives in memory, so restarting your agent discards anything you haven't asked it to read yet. Tick **Keep queue across restarts** in the pill to write it to the runtime directory instead. The setting is stored there too, since a toggle that reset on restart would forget at exactly the wrong moment.
+
+It's off by default. It applies to every project rather than per-repo, being a preference about your machine rather than about any one codebase, and the saved copy is discarded as soon as the agent drains the queue.
+
+Set `HYZER_ANNOTATE_DIR` to move the runtime directory somewhere else.
 
 ## Development
 
 ```sh
-npm run check   # typecheck + smoke test + extension build
+npm run check   # typecheck, tests, extension build
 ```
+
+`npm test` runs four suites:
+
+- `geometry.mjs` — capture and placement arithmetic: crop clamping, zoom scaling, band planning, stitch height, and the composer's flip-above-when-there's-no-room-below.
+- `token-scope.mjs` — runs the `:root` to `:host` rewrite over the real installed `@hyzer-labs/ui` stylesheet, so an upgrade that adds a `:root` selector fails here instead of silently shipping unstyled overlays.
+- `smoke.mjs` — boots the server and exercises the HTTP contract the extension depends on: discovery, claiming, screenshot decoding, queueing, input rejection. Then drains over MCP to check every annotation shape formats correctly.
+- `persistence.mjs` — restarts the server for real, which is the only way to prove the queue survives one.
+
+The server tests run against `HYZER_ANNOTATE_DIR`. Settings and the saved queue are shared by every server for a user, so without an override the suite would rewrite your real state.
 
 ### Packaging
 
 ```sh
 npm run icons              # regenerate icons/*.png from icon.svg (macOS only)
-npm run package:extension  # build + zip into release/ for the Chrome Web Store
+npm run package:extension  # build and zip into release/ for the Chrome Web Store
 ```
 
-The extension's version comes from `package.json` and is stamped into the
-manifest at build time — `extension-src/manifest.json` deliberately has no
-`version` field, so there is no second copy to forget on a release.
+The extension version comes from `package.json` and is stamped into the manifest at build time. `extension-src/manifest.json` has no `version` field at all, so there's no second copy to forget on a release.
 
-Icons are committed under `icons/` rather than generated during the build.
-Rasterizing needs `sips`, which is macOS-only, so a build that generated them
-would quietly ship an iconless extension on Linux and in CI. `npm run
-build:extension` fails outright if they are missing.
-
-`npm test` runs two checks. `test/geometry.mjs` covers the capture arithmetic — crop clamping, zoom scaling, band planning, stitch height. `test/smoke.mjs` boots the server and exercises the HTTP contract the extension depends on — discovery, claiming, screenshot decoding, queueing, input rejection — then drains the queue over MCP to check both annotation shapes format correctly.
+Icons are committed under `icons/` rather than generated during the build. Rasterizing needs `sips`, which is macOS-only, so generating them at build time would quietly ship an iconless extension on Linux and in CI. `npm run build:extension` fails outright if they're missing.
 
 ## License
 
