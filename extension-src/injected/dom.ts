@@ -103,10 +103,24 @@ globalThis.__opc_renderPill = function renderPill(
 
   const persistInput = h("input", { attrs: { type: "checkbox", "data-role": "persist-input" } }) as HTMLInputElement
   persistInput.checked = persistQueue
+  // The box flips itself on click, before the server has agreed. On success the
+  // pill is re-rendered with the new state; on failure nothing else would put
+  // the box back, so it would sit there claiming a setting that never took.
   persistInput.addEventListener("change", () => {
+    const wanted = persistInput.checked
+    const revert = () => {
+      if (persistInput.isConnected) persistInput.checked = !wanted
+    }
     try {
-      chrome.runtime.sendMessage({ type: "set_persist_queue", persistQueue: persistInput.checked })
-    } catch {}
+      chrome.runtime
+        .sendMessage({ type: "set_persist_queue", persistQueue: wanted })
+        .then((response) => {
+          if (!response?.ok) revert()
+        })
+        .catch(revert)
+    } catch {
+      revert()
+    }
   })
 
   const persistToggle = h("label", {

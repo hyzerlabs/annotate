@@ -7,6 +7,7 @@ import {
   setConnectionOverlayHidden,
   setConnectionOverlayQueue,
   showAnnotationError,
+  showToast,
 } from "./ui-overlays.js"
 import { showSessionPicker } from "./session-picker.js"
 import { runAnnotationPicker } from "./annotation-picker.js"
@@ -108,7 +109,17 @@ async function runMessageAction(message: ExtensionMessage, tab: chrome.tabs.Tab)
   if (message.type === "set_persist_queue") {
     const claim = claimedTabs.get(tab?.id)
     if (!claim?.baseUrl) throw new Error("Tab is not connected to an annotation server")
-    await postJson(claim.baseUrl, "/settings", { persistQueue: message.persistQueue })
+    try {
+      await postJson(claim.baseUrl, "/settings", { persistQueue: message.persistQueue })
+    } catch (error) {
+      // The server predates /settings. Restarting the agent is the fix, and
+      // saying "404" instead would send people looking for a network problem.
+      const text = error instanceof Error ? error.message : String(error)
+      if (text.includes("404")) {
+        throw new Error("This agent's annotation server is older than the queue setting. Restart the agent to pick it up.")
+      }
+      throw error
+    }
     // The setting is per server, so every tab pointed at it re-renders.
     await syncTabsOnServer(claim.baseUrl, { persistQueue: message.persistQueue })
     logExtension("Queue persistence changed", { baseUrl: claim.baseUrl, persistQueue: message.persistQueue })
@@ -141,7 +152,8 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
         error: text,
       })
     }
-    if (tab?.id) await showAnnotationError(tab.id, text).catch(() => {})
+    const title = message.type === "set_persist_queue" ? "Could not change the setting" : "Annotation failed"
+    if (tab?.id) await showAnnotationError(tab.id, text, title).catch(() => {})
     return { ok: false, error: text }
   }
 }
@@ -304,10 +316,18 @@ async function startAnnotationMode(
     queued: annotationResponse?.queued,
   })
 
-  // The POST response carries the new depth, so the badge updates immediately
-  // rather than waiting for the next monitor poll. Every tab on this server
-  // shares the queue, so they all move together.
+  // Confirmed only once the server has it. The composer slides away as soon as
+  // you submit, so without this the sole evidence anything happened is the
+  // counter ticking — and nothing at all distinguishes "sent" from "silently
+  // failed on the way out".
   const queued = Number(annotationResponse?.queued)
+  await showToast(tab.id, {
+    title: mode === "page" ? "Page comment sent" : "Annotation sent",
+    body: Number.isFinite(queued) ? `${queued} waiting for the agent` : undefined,
+    intent: "success",
+    durationMs: 2500,
+  }).catch(() => {})
+
   if (Number.isFinite(queued)) {
     await Promise.allSettled(
       Array.from(claimedTabs.entries()).map(async ([claimedTabId, claimed]) => {

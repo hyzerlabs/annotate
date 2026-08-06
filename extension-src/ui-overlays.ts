@@ -87,7 +87,9 @@ export async function removeConnectionOverlay(tabId: number): Promise<void> {
   }
 }
 
-export async function showAnnotationError(tabId: number, message: string): Promise<void> {
+type ToastOptions = { title: string; body?: string; intent?: "success" | "danger"; durationMs?: number }
+
+export async function showToast(tabId: number, options: ToastOptions): Promise<void> {
   await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
@@ -96,18 +98,22 @@ export async function showAnnotationError(tabId: number, message: string): Promi
   await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
-    args: [message],
-    func: (errorMessage: string) => {
+    args: [options],
+    func: (toastOptions: ToastOptions) => {
       const h = globalThis.__opc_h!
       const shadow = globalThis.__opc_shadow!
       if (typeof h !== "function" || typeof shadow !== "function") return
 
-      document.getElementById("__opc_annotation_error")?.remove()
-      const { host, root } = shadow("__opc_annotation_error", "picker")
+      // A single toast host, replaced rather than stacked: two of these landing
+      // on top of each other reads as a glitch.
+      document.getElementById("__opc_annotation_toast")?.remove()
+      const { host, root } = shadow("__opc_annotation_toast", "picker")
 
-      const toast = h("div", { attrs: { class: "surface toast" } }, [
-        h("div", { text: "Annotation failed", attrs: { class: "toast-title" } }),
-        h("div", { text: errorMessage, attrs: { class: "toast-body" } }),
+      const toast = h("div", {
+        attrs: { class: "surface toast", "data-intent": toastOptions.intent || "danger" },
+      }, [
+        h("div", { text: toastOptions.title, attrs: { class: "toast-title" } }),
+        ...(toastOptions.body ? [h("div", { text: toastOptions.body, attrs: { class: "toast-body" } })] : []),
       ])
       root.replaceChildren(toast)
 
@@ -115,7 +121,11 @@ export async function showAnnotationError(tabId: number, message: string): Promi
       setTimeout(() => {
         toast.removeAttribute("data-shown")
         setTimeout(() => host.remove(), 300)
-      }, 7000)
+      }, toastOptions.durationMs || 7000)
     },
   })
+}
+
+export async function showAnnotationError(tabId: number, message: string, title = "Annotation failed"): Promise<void> {
+  await showToast(tabId, { title, body: message, intent: "danger" })
 }
