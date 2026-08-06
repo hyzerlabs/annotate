@@ -113,11 +113,22 @@ function saveScreenshot(annotation: any): string | null {
   return filePath
 }
 
+function describeScreenshot(entry: QueuedAnnotation): string {
+  const shot = entry.annotation?.screenshot || {}
+  if (shot.mode === "page") {
+    return shot.truncated
+      ? `${entry.screenshotPath} (whole page, truncated — the page was taller than the capture limit)`
+      : `${entry.screenshotPath} (whole page)`
+  }
+  return shot.cropped === false
+    ? `${entry.screenshotPath} (full viewport — the element had scrolled out of view)`
+    : `${entry.screenshotPath} (cropped to the element)`
+}
+
 function formatAnnotation(entry: QueuedAnnotation, index: number): string {
   const { annotation } = entry
   const page = annotation?.page || {}
-  const element = annotation?.element || {}
-  const rect = element?.rect || {}
+  const element = annotation?.element
   const comment = typeof annotation?.comment === "string" ? annotation.comment.trim() : ""
 
   const lines = [
@@ -126,14 +137,23 @@ function formatAnnotation(entry: QueuedAnnotation, index: number): string {
     comment || "(no comment provided)",
     "",
     `- Page: ${page.title || "(untitled)"} — ${page.url || ""}`,
-    `- Element: <${element.tag || "?"}>${element.role ? ` role=${element.role}` : ""}${element.id ? ` id=${element.id}` : ""}`,
-    `- Selector: ${element.selector || ""}`,
   ]
-  if (element.className) lines.push(`- Class: ${element.className}`)
-  if (element.ariaLabel) lines.push(`- Aria label: ${element.ariaLabel}`)
-  if (element.text) lines.push(`- Text: ${String(element.text).slice(0, 300)}`)
-  lines.push(`- Rect: x=${rect.x ?? "?"} y=${rect.y ?? "?"} w=${rect.width ?? "?"} h=${rect.height ?? "?"}`)
-  if (entry.screenshotPath) lines.push(`- Screenshot: ${entry.screenshotPath}`)
+
+  if (element) {
+    const rect = element.rect || {}
+    lines.push(
+      `- Element: <${element.tag || "?"}>${element.role ? ` role=${element.role}` : ""}${element.id ? ` id=${element.id}` : ""}`,
+      `- Selector: ${element.selector || ""}`
+    )
+    if (element.className) lines.push(`- Class: ${element.className}`)
+    if (element.ariaLabel) lines.push(`- Aria label: ${element.ariaLabel}`)
+    if (element.text) lines.push(`- Text: ${String(element.text).slice(0, 300)}`)
+    lines.push(`- Rect: x=${rect.x ?? "?"} y=${rect.y ?? "?"} w=${rect.width ?? "?"} h=${rect.height ?? "?"}`)
+  } else {
+    lines.push("- Scope: whole page (no element selected)")
+  }
+
+  if (entry.screenshotPath) lines.push(`- Screenshot: ${describeScreenshot(entry)}`)
   return lines.join("\n")
 }
 
@@ -311,7 +331,7 @@ mcp.registerTool(
   {
     title: "Get browser annotations",
     description:
-      "Drain pending browser annotations left by the user. Each one has a comment, the DOM element it was anchored to, page URL, and a screenshot file path. Call this when the user refers to feedback they left in the browser.",
+      "Drain pending browser annotations left by the user. Each one has a comment, the page URL, and a screenshot file path — either cropped to the DOM element the user pointed at (with that element's selector and metadata), or a shot of the whole page when they commented on the page as a whole. Call this when the user refers to feedback they left in the browser.",
     inputSchema: {},
   },
   async () => {

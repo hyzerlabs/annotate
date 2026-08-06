@@ -28,7 +28,15 @@ Modifications by Hyzer Labs, beginning 2026-08-06:
     other's servers.
   - Rewrote user-facing strings in extension-src/ to be agent-neutral.
   - Replaced bun with esbuild in the build scripts.
-  - Added test/smoke.mjs.
+  - Added test/smoke.mjs and test/geometry.mjs.
+  - Added extension-src/capture.ts and extension-src/geometry.ts: screenshots
+    are now cropped to the annotated element, or stitched into a full-page
+    capture in the new "Capture" mode, rather than always being the raw
+    visible viewport. The connection pill hides itself during capture.
+  - Consolidated the two divergent connection-pill renderers into
+    __opc_renderPill in extension-src/injected/dom.ts. Upstream built the pill
+    in both the overlay injector and the session picker, and only the former
+    had a disconnect button, so it was usually absent.
 
 The unmodified upstream source is preserved as the first commit in this
 repository's history for comparison.

@@ -3,7 +3,8 @@ import type { SessionInfo, SessionPickerContext } from "./types.js"
 function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext) {
   const h = globalThis.__opc_h!
   const makeDockable = globalThis.__opc_makeDockable!
-  if (typeof h !== "function" || typeof makeDockable !== "function") {
+  const renderPill = globalThis.__opc_renderPill!
+  if (typeof h !== "function" || typeof makeDockable !== "function" || typeof renderPill !== "function") {
     throw new Error("Annotation UI helpers are unavailable")
   }
 
@@ -12,27 +13,6 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
   }
 
   const STYLE = {
-    collapsed: [
-      "position:fixed",
-      "left:50%",
-      "z-index:2147483647",
-      "transform:translateX(-50%)",
-      "display:flex",
-      "align-items:center",
-      "gap:8px",
-      "padding:6px 8px 6px 10px",
-      "border-radius:999px",
-      "background:rgba(15,23,42,0.92)",
-      "color:#bbf7d0",
-      "border:1px solid rgba(34,197,94,0.45)",
-      "box-shadow:0 8px 24px rgba(0,0,0,0.22)",
-      "font:12px/1.2 ui-sans-serif,system-ui,sans-serif",
-      "pointer-events:auto",
-      "backdrop-filter:blur(8px)",
-      "cursor:grab",
-      "user-select:none",
-      "-webkit-user-select:none",
-    ].join(";"),
     expanded: [
       "position:fixed",
       "left:50%",
@@ -53,9 +33,6 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
       "user-select:none",
       "-webkit-user-select:none",
     ].join(";"),
-    row: "display:flex;align-items:center;gap:8px;",
-    label: "font-weight:600;",
-    annotate: "border:0;border-radius:999px;padding:4px 8px;background:#22c55e;color:#052e16;font:600 11px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;",
     title: "font-weight:700;margin:2px 4px 8px;color:#bbf7d0;",
     header: "display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 2px 8px;",
     empty: "padding:8px 4px 2px;color:#dcfce7;",
@@ -94,36 +71,6 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
     }
 
     return { overlay, existed }
-  }
-
-  function renderCollapsed(overlay: HTMLElement, labelText: string) {
-    overlay.innerHTML = ""
-    overlay.style.cssText = STYLE.collapsed
-    const dockable = makeDockable(overlay, { blockDragSelector: "button", snapThreshold: 10 })
-    dockable.applyDockPosition(overlay.dataset.dock)
-
-    const label = h("span", {
-      text: labelText,
-      style: STYLE.label,
-      attrs: { "data-role": "label" },
-    })
-
-    const annotate = h("button", {
-      text: "Annotate",
-      style: STYLE.annotate,
-      attrs: { type: "button" },
-      on: {
-        click: (event: Event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          try {
-            chrome.runtime.sendMessage({ type: "start_annotation_from_overlay" })
-          } catch {}
-        },
-      },
-    })
-
-    overlay.appendChild(h("div", { style: STYLE.row }, [label, annotate]))
   }
 
   function sessionButton(onSelect: () => void, item: SessionInfo) {
@@ -228,7 +175,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
       overlay.remove()
       return
     }
-    renderCollapsed(overlay, priorLabel)
+    renderPill(overlay, priorLabel)
   }
 
   overlay.appendChild(

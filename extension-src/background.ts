@@ -1,12 +1,18 @@
 import { logExtension, warnExtension } from "./logger.js"
 import { getActiveTab } from "./tabs.js"
 import { postJson, requestSessionState } from "./server-api.js"
-import { injectConnectionOverlay, removeConnectionOverlay, showAnnotationError } from "./ui-overlays.js"
+import {
+  injectConnectionOverlay,
+  removeConnectionOverlay,
+  setConnectionOverlayHidden,
+  showAnnotationError,
+} from "./ui-overlays.js"
 import { showSessionPicker } from "./session-picker.js"
 import { runAnnotationPicker } from "./annotation-picker.js"
+import { captureElement, captureFullPage } from "./capture.js"
 import { createConnectionMonitor } from "./connection-monitor.js"
 import { createClaimsStore } from "./claims-store.js"
-import type { AnnotationPayload, ExtensionMessage, SessionInfo } from "./types.js"
+import type { AnnotationMode, AnnotationPayload, ExtensionMessage, SessionInfo } from "./types.js"
 
 const claimedTabs = createClaimsStore()
 const extensionVersion = chrome.runtime.getManifest().version
@@ -19,6 +25,7 @@ const monitor = createConnectionMonitor({
 
 const MESSAGE_TYPE = {
   START_ANNOTATION: "start_annotation_from_overlay",
+  START_CAPTURE: "start_capture_from_overlay",
   CONNECT_TAB: "connect_tab_to_session",
   DISCONNECT_TAB: "disconnect_tab",
   REFRESH_SESSIONS: "refresh_sessions",
@@ -85,7 +92,8 @@ async function runMessageAction(message: ExtensionMessage, tab: chrome.tabs.Tab)
     return { ok: true, sessions: sessions.length }
   }
 
-  const result = await startAnnotationMode(tab)
+  const mode: AnnotationMode = message.type === "start_capture_from_overlay" ? "page" : "element"
+  const result = await startAnnotationMode(tab, mode)
   return { ok: true, cancelled: !!result?.cancelled }
 }
 
@@ -167,39 +175,54 @@ async function disconnectTab(tab: chrome.tabs.Tab): Promise<boolean> {
   return true
 }
 
-async function startAnnotationMode(tabOverride?: chrome.tabs.Tab): Promise<{ cancelled: boolean }> {
+async function startAnnotationMode(
+  tabOverride: chrome.tabs.Tab | undefined,
+  mode: AnnotationMode
+): Promise<{ cancelled: boolean }> {
   const tab = tabOverride?.id ? tabOverride : await getActiveTab()
   if (!tab?.id || !tab.windowId) throw new Error("No active tab found")
 
   logExtension("Starting annotation mode", {
     tabId: tab.id,
     windowId: tab.windowId,
+    mode,
     url: tab.url,
     title: tab.title,
   })
 
-  const picked = await runAnnotationPicker(tab.id)
+  const picked = await runAnnotationPicker(tab.id, mode)
   if (!picked || picked.cancelled === true) return { cancelled: true }
 
-  logExtension("Capturing annotation screenshot", { tabId: tab.id, windowId: tab.windowId })
-  const screenshot = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" })
+  logExtension("Capturing annotation screenshot", { tabId: tab.id, windowId: tab.windowId, mode })
+  // Our own pill would otherwise land in every shot.
+  await setConnectionOverlayHidden(tab.id, true)
+  let screenshot
+  try {
+    screenshot =
+      mode === "page" || !picked.element
+        ? await captureFullPage(tab)
+        : await captureElement(tab, picked.element, picked.viewport)
+  } finally {
+    await setConnectionOverlayHidden(tab.id, false)
+  }
   logExtension("Captured annotation screenshot", {
     tabId: tab.id,
-    bytesApprox: Math.round((screenshot.length * 3) / 4),
+    mode: screenshot.mode,
+    cropped: screenshot.cropped,
+    truncated: screenshot.truncated,
+    bytesApprox: Math.round((screenshot.dataUrl.length * 3) / 4),
   })
 
   const annotationPayload: AnnotationPayload = {
     comment: picked.comment || "",
+    mode,
     page: {
       url: tab.url || "",
       title: tab.title || "",
     },
     element: picked.element,
     viewport: picked.viewport,
-    screenshot: {
-      mime: "image/png",
-      dataUrl: screenshot,
-    },
+    screenshot,
   }
 
   logExtension("Sending annotation upstream", {

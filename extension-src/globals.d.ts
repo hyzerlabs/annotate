@@ -12,6 +12,7 @@ declare global {
 
   var __opc_h: ((tag: string, options?: OpcElementOptions, children?: Node[]) => HTMLElement) | undefined
   var __opc_makeDockable: ((overlay: HTMLElement, options?: { blockDragSelector?: string; snapThreshold?: number }) => OpcDockApi) | undefined
+  var __opc_renderPill: ((overlay: HTMLElement, labelText: string) => void) | undefined
   var __opc_cleanupSessionPicker: (() => void) | undefined
 
   interface HTMLElement {

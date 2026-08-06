@@ -1,7 +1,7 @@
 import { logExtension, warnExtension } from "./logger.js"
-import type { AnnotationElement, AnnotationPickerResult, AnnotationViewport } from "./types.js"
+import type { AnnotationElement, AnnotationMode, AnnotationPickerResult, AnnotationViewport } from "./types.js"
 
-function annotationPickerScript(): Promise<AnnotationPickerResult> {
+function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerResult> {
   const h = globalThis.__opc_h!
   if (typeof h !== "function") {
     throw new Error("Annotation UI helper is unavailable")
@@ -117,7 +117,7 @@ function annotationPickerScript(): Promise<AnnotationPickerResult> {
     }) as HTMLButtonElement
 
     const panel = h("div", { style: STYLE.panel }, [
-      h("div", { text: "Annotate selection", style: STYLE.title }),
+      h("div", { text: mode === "page" ? "Comment on this page" : "Annotate selection", style: STYLE.title }),
       targetInfo,
       textarea,
       h("div", { style: STYLE.actions }, [cancelButton, submitButton]),
@@ -189,14 +189,14 @@ function annotationPickerScript(): Promise<AnnotationPickerResult> {
     }
 
     function submitAnnotation() {
-      if (!state.selected) {
+      if (mode === "element" && !state.selected) {
         finish({ cancelled: true })
         return
       }
       finishWithSendAnimation({
         cancelled: false,
         comment: ui.textarea.value.trim(),
-        element: describeElement(state.selected),
+        element: state.selected ? describeElement(state.selected) : null,
         viewport: describeViewport(),
       })
     }
@@ -241,14 +241,22 @@ function annotationPickerScript(): Promise<AnnotationPickerResult> {
     ui.cancelButton.addEventListener("click", () => finish({ cancelled: true }))
     ui.submitButton.addEventListener("click", submitAnnotation)
 
-    document.addEventListener("mousemove", onMouseMove, true)
-    document.addEventListener("click", onClick, true)
+    // Page mode has nothing to point at, so skip straight to the comment box.
+    if (mode === "page") {
+      state.locked = true
+      ui.targetInfo.textContent = "Whole page"
+      ui.panel.style.display = "block"
+      ui.textarea.focus()
+    } else {
+      document.addEventListener("mousemove", onMouseMove, true)
+      document.addEventListener("click", onClick, true)
+    }
     document.addEventListener("keydown", onKeyDown, true)
   })
 }
 
-export async function runAnnotationPicker(tabId: number): Promise<AnnotationPickerResult | null> {
-  logExtension("Starting annotation picker", { tabId })
+export async function runAnnotationPicker(tabId: number, mode: AnnotationMode): Promise<AnnotationPickerResult | null> {
+  logExtension("Starting annotation picker", { tabId, mode })
   await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
@@ -257,6 +265,7 @@ export async function runAnnotationPicker(tabId: number): Promise<AnnotationPick
   const result = await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
+    args: [mode],
     func: annotationPickerScript,
   })
 

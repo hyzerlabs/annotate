@@ -48,31 +48,44 @@ export type AnnotationViewport = {
   devicePixelRatio: number
 }
 
+// "element": user picked a node, screenshot is cropped to it.
+// "page": no node, screenshot is the whole scrollable page.
+export type AnnotationMode = "element" | "page"
+
 export type AnnotationPickerResult =
   | { cancelled: true }
   | {
       cancelled: false
       comment: string
-      element: AnnotationElement
+      element: AnnotationElement | null
       viewport: AnnotationViewport
     }
 
+export type AnnotationScreenshot = {
+  mime: "image/png"
+  dataUrl: string
+  mode: AnnotationMode
+  /** element mode: false when the element was offscreen and the full viewport was sent instead */
+  cropped?: boolean
+  /** page mode: true when the page was taller than the band cap */
+  truncated?: boolean
+}
+
 export type AnnotationPayload = {
   comment: string
+  mode: AnnotationMode
   page: {
     url: string
     title: string
   }
-  element: AnnotationElement
+  element: AnnotationElement | null
   viewport: AnnotationViewport
-  screenshot: {
-    mime: "image/png"
-    dataUrl: string
-  }
+  screenshot: AnnotationScreenshot
 }
 
 export type ExtensionMessage =
   | { type: "start_annotation_from_overlay" }
+  | { type: "start_capture_from_overlay" }
   | { type: "connect_tab_to_session"; session: SessionInfo }
   | { type: "disconnect_tab" }
   | { type: "refresh_sessions" }

@@ -21,7 +21,13 @@ npm run build:all
 
 **Register the MCP server** with your agent, pointing at the absolute path of `dist/server.js`.
 
-For Claude Code, in your project's `.mcp.json`:
+For Claude Code, register it once at user scope so it's available in every project you annotate:
+
+```sh
+claude mcp add hyzer-annotate --scope user -- node /absolute/path/to/hyzer-annotate/dist/server.js
+```
+
+Or per-project, in that project's `.mcp.json`:
 
 ```json
 {
@@ -34,18 +40,53 @@ For Claude Code, in your project's `.mcp.json`:
 }
 ```
 
+User scope is usually what you want — the server binds a port per agent process and the extension discovers whichever ones are running, so registering it everywhere costs nothing and saves you doing this per repo.
+
 Restart the agent after adding it.
+
+**Optional — a shortcut to drain the queue.** Anything like "check annotations" works, but a slash command is shorter. Put this in `~/.claude/commands/fb.md` (user scope, matching the server above):
+
+```markdown
+---
+description: Drain the browser annotation queue and act on the feedback
+---
+
+Call `get_annotations` to drain the browser annotation queue.
+
+For each annotation: the comment is the ask, the selector and element metadata
+say where, and the screenshot path is there when you need to see it — read it
+if the comment is visual ("this looks wrong", "spacing is off"), skip it if the
+comment already tells you what to change.
+
+Then do the work. Group annotations that touch the same component into one edit
+rather than fixing them one at a time.
+
+$ARGUMENTS
+```
+
+Then `/fb` drains and acts, or `/fb just summarize, don't edit` to steer it.
 
 ## Use
 
 1. Click the extension icon and connect the tab to your agent session.
-2. Click **Annotate** in the in-page pill, then click the element you want to talk about.
-3. Type your comment and submit. Repeat as many times as you like.
-4. Tell your agent to check the annotations. It calls `get_annotations`, which drains everything you've queued.
+2. In the in-page pill, either:
+   - **Annotate** — click the element you want to talk about, then comment on it.
+   - **Capture** — comment on the page as a whole, no element picking.
+3. Submit. Repeat as many times as you like.
+4. Tell your agent to check the annotations (or `/fb`, if you added the command above). It calls `get_annotations`, which drains everything you've queued.
+
+Use the **×** in the pill to disconnect the tab. It also disconnects on its own when you close the tab, navigate to a different origin, or the agent stops.
 
 Batching is on the receiving end: every annotation POSTs immediately, and the agent picks up the whole queue in one call. There's no "send" step to remember.
 
-Screenshots are written to a temp directory and passed to the agent as file paths, so it can read the image only when it needs to.
+## Screenshots
+
+Every annotation carries one. **Annotate** crops to the element you picked (plus a little padding for context); **Capture** stitches the whole scrollable page from viewport captures. Either way the image is written to a temp directory and passed to the agent as a file path, so it reads the image only when it needs to.
+
+The pill hides itself during capture so it stays out of the shot. Two things worth knowing about full-page capture:
+
+- `captureVisibleTab` is rate-limited to 2 calls/sec, so a tall page takes a beat — and stitching stops at 12 viewport-heights. The agent is told when a shot was truncated.
+- Fixed and sticky elements are hidden after the first band, otherwise a sticky header gets stamped into every strip. A sticky sidebar will leave a gap.
 
 ## Development
 
@@ -53,7 +94,7 @@ Screenshots are written to a temp directory and passed to the agent as file path
 npm run check   # typecheck + smoke test + extension build
 ```
 
-`npm test` builds the server and exercises the HTTP contract the extension depends on — discovery, claiming, screenshot decoding, queueing, and input rejection.
+`npm test` runs two checks. `test/geometry.mjs` covers the capture arithmetic — crop clamping, zoom scaling, band planning, stitch height. `test/smoke.mjs` boots the server and exercises the HTTP contract the extension depends on — discovery, claiming, screenshot decoding, queueing, input rejection — then drains the queue over MCP to check both annotation shapes format correctly.
 
 ## License
 

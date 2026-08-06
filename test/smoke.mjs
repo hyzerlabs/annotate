@@ -32,6 +32,40 @@ async function findServer() {
   throw new Error(`server never came up. stderr:\n${stderr}`)
 }
 
+// Minimal MCP stdio client — enough to call one tool. The formatting path only
+// runs here, so HTTP-only assertions would miss it entirely.
+let rpcId = 0
+let stdoutBuffer = ""
+const pendingRpc = new Map()
+child.stdout.on("data", (chunk) => {
+  stdoutBuffer += chunk
+  let newline
+  while ((newline = stdoutBuffer.indexOf("\n")) >= 0) {
+    const line = stdoutBuffer.slice(0, newline).trim()
+    stdoutBuffer = stdoutBuffer.slice(newline + 1)
+    if (!line) continue
+    const message = JSON.parse(line)
+    const resolve = pendingRpc.get(message.id)
+    if (resolve) {
+      pendingRpc.delete(message.id)
+      resolve(message)
+    }
+  }
+})
+
+function rpc(method, params) {
+  const id = ++rpcId
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`)
+  return new Promise((resolve, reject) => {
+    pendingRpc.set(id, resolve)
+    setTimeout(() => reject(new Error(`rpc timeout: ${method}`)), 5000).unref()
+  })
+}
+
+function notify(method, params) {
+  child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`)
+}
+
 async function post(port, path, body) {
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: "POST",
@@ -59,17 +93,34 @@ try {
     sessionId,
     annotation: {
       comment: "this button is misaligned",
+      mode: "element",
       page: { url: "http://localhost:5173/docs", title: "Docs" },
       element: { selector: "button.hz-button", tag: "button", role: "button", text: "Save", rect: { x: 1, y: 2, width: 3, height: 4 } },
       viewport: { width: 1280, height: 800, devicePixelRatio: 2 },
-      screenshot: { mime: "image/png", dataUrl: PNG },
+      screenshot: { mime: "image/png", dataUrl: PNG, mode: "element", cropped: true },
     },
   })
   assert.equal(sent.ok, true)
   assert.equal(sent.queued, 1)
 
+  // page mode: no element at all, must still queue rather than blow up formatting
+  const captured = await post(port, "/annotation", {
+    tabId: 7,
+    sessionId,
+    annotation: {
+      comment: "the whole layout breaks under 900px",
+      mode: "page",
+      page: { url: "http://localhost:5173/docs", title: "Docs" },
+      element: null,
+      viewport: { width: 1280, height: 800, devicePixelRatio: 2 },
+      screenshot: { mime: "image/png", dataUrl: PNG, mode: "page", truncated: true },
+    },
+  })
+  assert.equal(captured.ok, true)
+  assert.equal(captured.queued, 2)
+
   const after = await (await fetch(`http://127.0.0.1:${port}/status`)).json()
-  assert.equal(after.queued, 1)
+  assert.equal(after.queued, 2)
   assert.equal(after.claims.length, 1)
   assert.equal(after.claims[0].tabId, 7)
 
@@ -80,6 +131,25 @@ try {
   const written = readdirSync(shots).filter((f) => f.endsWith(".png"))
   assert.ok(written.length > 0, "screenshot written")
   assert.ok(statSync(`${shots}/${written[written.length - 1]}`).size > 0, "screenshot non-empty")
+
+  // drain over MCP — exercises formatAnnotation for both modes
+  await rpc("initialize", {
+    protocolVersion: "2024-11-05",
+    capabilities: {},
+    clientInfo: { name: "smoke", version: "0" },
+  })
+  notify("notifications/initialized")
+  const drained = await rpc("tools/call", { name: "get_annotations", arguments: {} })
+  const text = drained.result.content[0].text
+  assert.match(text, /2 annotation\(s\)/)
+  assert.match(text, /Selector: button\.hz-button/, "element mode keeps selector")
+  assert.match(text, /cropped to the element/)
+  assert.match(text, /Scope: whole page/, "page mode says so instead of printing empty element fields")
+  assert.match(text, /whole page, truncated/)
+  assert.doesNotMatch(text, /<\?>/, "no placeholder element rendered for page-mode annotations")
+
+  const emptied = await (await fetch(`http://127.0.0.1:${port}/status`)).json()
+  assert.equal(emptied.queued, 0, "get_annotations drains the queue")
 
   const unclaimed = await post(port, "/unclaim", { tabId: 7 })
   assert.equal(unclaimed.ok, true)
