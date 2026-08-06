@@ -1,6 +1,6 @@
 // Capture arithmetic. Runs on Node's native TS stripping — no build step.
 import assert from "node:assert/strict"
-import { captureScale, cropBox, planBands, stitchHeight } from "../extension-src/geometry.ts"
+import { anchorPosition, captureScale, cropBox, planBands, stitchHeight } from "../extension-src/geometry.ts"
 
 const VIEWPORT = { width: 1280, height: 800 }
 const RETINA = { width: 2560, height: 1600 }
@@ -47,5 +47,40 @@ assert.equal(stitchHeight(40000, 800, 12, 2), 19200, "truncated stitch is bands 
 const scale = 2
 const lastBandTop = Math.round((3900 - 800) * scale)
 assert.ok(lastBandTop + 800 * scale <= stitchHeight(3900, 800, 5, scale), "final band fits the canvas exactly")
+
+// ── composer anchoring ──────────────────────────────────────────────────
+const VIEW = { width: 1280, height: 800 }
+const PANEL = { width: 400, height: 300 }
+// a pill near the top, and the same pill dragged near the bottom
+const pillTop = { x: 440, y: 8, width: 240, height: 56 }
+const pillBottom = { x: 440, y: 700, width: 240, height: 56 }
+
+const below = anchorPosition(pillTop, PANEL, VIEW)
+assert.equal(below.side, "bottom", "plenty of room below")
+assert.equal(below.top, 8 + 56 + 8, "sits one offset under the pill")
+assert.equal(below.left, 440, "aligned to the pill's left edge")
+
+const flipped = anchorPosition(pillBottom, PANEL, VIEW)
+assert.equal(flipped.side, "top", "no room below, so flip")
+assert.equal(flipped.top, 700 - 8 - 300, "bottom edge one offset above the pill's top")
+assert.ok(flipped.top + PANEL.height <= pillBottom.y, "never overlaps the pill — the whole point")
+
+// exact-fit boundary: room below is exactly the panel height, so no flip
+const exact = { x: 0, y: VIEW.height - PANEL.height - 8 - 8 - 56, width: 240, height: 56 }
+assert.equal(anchorPosition(exact, PANEL, VIEW).side, "bottom", "an exact fit still counts as fitting")
+
+// taller than either side: takes the roomier one rather than flipping blindly
+const tall = { width: 400, height: 5000 }
+assert.equal(anchorPosition(pillBottom, tall, VIEW).side, "top", "more room above")
+assert.equal(anchorPosition(pillTop, tall, VIEW).side, "bottom", "more room below")
+
+// shifted along the align axis to stay on screen
+const offRight = anchorPosition({ x: 1200, y: 8, width: 60, height: 56 }, PANEL, VIEW)
+assert.equal(offRight.left, VIEW.width - PANEL.width - 8, "shifted back inside the right edge")
+const offLeft = anchorPosition({ x: -50, y: 8, width: 60, height: 56 }, PANEL, VIEW)
+assert.equal(offLeft.left, 8, "shifted back inside the left edge")
+
+// a viewport narrower than the panel still yields a usable left, not a negative
+assert.equal(anchorPosition(pillTop, PANEL, { width: 320, height: 800 }).left, 8)
 
 console.log("geometry: ok")

@@ -119,8 +119,24 @@ try {
   assert.equal(captured.ok, true)
   assert.equal(captured.queued, 2)
 
+  // screenshot toggle off: no image at all, must queue and format cleanly
+  const noShot = await post(port, "/annotation", {
+    tabId: 7,
+    sessionId,
+    annotation: {
+      comment: "rename this variable",
+      mode: "element",
+      page: { url: "http://localhost:5173/docs", title: "Docs" },
+      element: { selector: "code.token", tag: "code", role: "", text: "foo", rect: { x: 0, y: 0, width: 10, height: 10 } },
+      viewport: { width: 1280, height: 800, devicePixelRatio: 2 },
+      screenshot: null,
+    },
+  })
+  assert.equal(noShot.ok, true)
+  assert.equal(noShot.queued, 3)
+
   const after = await (await fetch(`http://127.0.0.1:${port}/status`)).json()
-  assert.equal(after.queued, 2)
+  assert.equal(after.queued, 3)
   assert.equal(after.claims.length, 1)
   assert.equal(after.claims[0].tabId, 7)
 
@@ -141,11 +157,12 @@ try {
   notify("notifications/initialized")
   const drained = await rpc("tools/call", { name: "get_annotations", arguments: {} })
   const text = drained.result.content[0].text
-  assert.match(text, /2 annotation\(s\)/)
+  assert.match(text, /3 annotation\(s\)/)
   assert.match(text, /Selector: button\.hz-button/, "element mode keeps selector")
   assert.match(text, /cropped to the element/)
   assert.match(text, /Scope: whole page/, "page mode says so instead of printing empty element fields")
   assert.match(text, /whole page, truncated/)
+  assert.match(text, /Screenshot: none/, "an omitted screenshot is stated, not silently absent")
   assert.doesNotMatch(text, /<\?>/, "no placeholder element rendered for page-mode annotations")
 
   const emptied = await (await fetch(`http://127.0.0.1:${port}/status`)).json()

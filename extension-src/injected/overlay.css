@@ -1,0 +1,481 @@
+/*
+ * Chrome for every hyzer-annotate overlay.
+ *
+ * This sheet is adopted into a shadow root, never the page. Colors, radii,
+ * type and shadows come from @hyzer-labs/ui tokens so the tool looks like the
+ * rest of hyzer; the tokens themselves are scoped to :host by __opc_shadow.
+ */
+
+:host {
+	/* The density ladder is declared on `body`, which does not exist inside a
+	 * shadow root. The token docs say to declare a rung directly when you want
+	 * one, so this is the sanctioned escape hatch rather than a workaround. */
+	--hz-space-near: 6px;
+	--hz-space-away: 12px;
+
+	--opc-surface: color-mix(in srgb, var(--hz-color-surface) 92%, transparent);
+	--opc-hairline: color-mix(in srgb, var(--hz-color-border) 28%, transparent);
+	--opc-hover: color-mix(in srgb, var(--hz-color-text) 8%, transparent);
+
+	/* Nothing inherits in from the page. `all` deliberately skips custom
+	 * properties, so the tokens above survive it. */
+	all: initial;
+
+	position: fixed;
+	z-index: 2147483647;
+	font-family: var(--hz-font-family-sans);
+	font-size: 0.8125rem;
+	line-height: 1.35;
+	color: var(--hz-color-text);
+	-webkit-font-smoothing: antialiased;
+}
+
+/* left/top/transform are deliberately absent: makeDraggable owns them inline.
+ * Anything declared here would reassert itself the moment the inline value is
+ * cleared and shift the position the user just chose. */
+:host([data-overlay='dock']) {
+	cursor: grab;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+:host([data-overlay='picker']) {
+	inset: 0;
+	pointer-events: none;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+/* ── surfaces ─────────────────────────────────────────────────────────── */
+
+.surface {
+	background: var(--opc-surface);
+	border: 1px solid var(--opc-hairline);
+	box-shadow: var(--hz-shadow-md);
+	backdrop-filter: blur(12px) saturate(1.4);
+	-webkit-backdrop-filter: blur(12px) saturate(1.4);
+}
+
+.pill {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 7px 8px 8px 10px;
+	border-radius: var(--hz-radius-md);
+}
+
+.pill-row {
+	display: flex;
+	align-items: center;
+	gap: var(--hz-space-near);
+}
+
+.pill-row-actions {
+	gap: 5px;
+}
+
+.spacer {
+	flex: 1 1 auto;
+}
+
+.panel {
+	width: min(400px, calc(100vw - 24px));
+	padding: var(--hz-space-away);
+	border-radius: var(--hz-radius-md);
+	box-shadow: var(--hz-shadow-lg);
+}
+
+/* ── controls ─────────────────────────────────────────────────────────── */
+
+button {
+	font: inherit;
+	color: inherit;
+	margin: 0;
+	cursor: pointer;
+	border-radius: var(--hz-radius-full);
+	border: 1px solid transparent;
+	background: transparent;
+	transition: background-color var(--hz-duration-fast) var(--hz-ease-standard),
+		border-color var(--hz-duration-fast) var(--hz-ease-standard);
+}
+
+button:focus-visible {
+	outline: 2px solid var(--hz-intent-primary);
+	outline-offset: 2px;
+}
+
+button:disabled {
+	opacity: 0.5;
+	cursor: default;
+}
+
+.btn {
+	padding: 5px 11px;
+	font-weight: var(--hz-font-weight-medium);
+	white-space: nowrap;
+}
+
+/* Text on a solid intent background is --hz-color-surface, not white: surface
+ * flips with the theme, so this stays readable when dark mode lightens the
+ * intent hue. */
+.btn-primary {
+	background: var(--hz-intent-primary);
+	color: var(--hz-color-surface);
+}
+
+.btn-primary:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--hz-intent-primary) 85%, var(--hz-color-text));
+}
+
+.btn-secondary {
+	background: var(--hz-intent-secondary);
+	color: var(--hz-color-surface);
+}
+
+.btn-secondary:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--hz-intent-secondary) 85%, var(--hz-color-text));
+}
+
+/* Soft variant: the intent hue as a tint plus matching text, so a destructive
+ * action reads as destructive without shouting louder than the primary one. */
+.btn-soft-danger {
+	background: color-mix(in srgb, var(--hz-intent-danger) 12%, transparent);
+	color: var(--hz-intent-danger);
+}
+
+.btn-soft-danger:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--hz-intent-danger) 22%, transparent);
+}
+
+.btn-quiet {
+	border-color: var(--opc-hairline);
+	color: var(--hz-color-text-muted);
+}
+
+.btn-quiet:hover:not(:disabled) {
+	background: var(--opc-hover);
+	color: var(--hz-color-text);
+}
+
+.btn-icon {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 22px;
+	height: 22px;
+	padding: 0;
+	color: var(--hz-color-text-muted);
+}
+
+.btn-icon:hover:not(:disabled) {
+	background: var(--opc-hover);
+	color: var(--hz-color-text);
+}
+
+.btn-icon-danger {
+	color: var(--hz-intent-danger);
+}
+
+.btn-icon-danger:hover:not(:disabled) {
+	background: color-mix(in srgb, var(--hz-intent-danger) 15%, transparent);
+	color: var(--hz-intent-danger);
+}
+
+/* ── pill ─────────────────────────────────────────────────────────────── */
+
+.status {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--hz-space-near);
+	min-width: 0;
+	color: var(--hz-color-text-muted);
+}
+
+.status::before {
+	content: '';
+	flex: none;
+	width: 6px;
+	height: 6px;
+	border-radius: var(--hz-radius-full);
+	background: var(--hz-intent-success);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--hz-intent-success) 20%, transparent);
+}
+
+.session {
+	color: var(--hz-color-text);
+	font-weight: var(--hz-font-weight-medium);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 22ch;
+}
+
+/* Queue depth. Hidden at zero rather than showing "0 queued", which reads as
+ * a broken counter. */
+.queue {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	padding-right: 2px;
+	color: var(--hz-color-text-muted);
+	font-size: 0.75rem;
+	white-space: nowrap;
+}
+
+.queue[hidden] {
+	display: none;
+}
+
+.queue-count {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 17px;
+	height: 17px;
+	padding: 0 5px;
+	border-radius: var(--hz-radius-full);
+	background: color-mix(in srgb, var(--hz-intent-primary) 16%, transparent);
+	color: var(--hz-intent-primary);
+	font-weight: var(--hz-font-weight-semibold);
+	font-variant-numeric: tabular-nums;
+}
+
+/* ── session picker ───────────────────────────────────────────────────── */
+
+.header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: var(--hz-space-near);
+	margin-bottom: var(--hz-space-near);
+}
+
+.heading {
+	font-weight: var(--hz-font-weight-semibold);
+	color: var(--hz-color-text);
+}
+
+.list {
+	display: flex;
+	flex-direction: column;
+	margin: 0 calc(var(--hz-space-near) * -1);
+}
+
+.item {
+	display: block;
+	width: 100%;
+	text-align: left;
+	padding: 8px var(--hz-space-near);
+	border-radius: var(--hz-radius-sm);
+}
+
+.item:hover,
+.item[data-focused] {
+	background: var(--opc-hover);
+}
+
+.item-name {
+	font-weight: var(--hz-font-weight-medium);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.item-meta {
+	margin-top: 1px;
+	color: var(--hz-color-text-muted);
+	font-size: 0.75rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.empty p {
+	margin: 0 0 var(--hz-space-near);
+	color: var(--hz-color-text-muted);
+}
+
+.empty ol {
+	margin: 0;
+	padding-left: 1.25rem;
+	color: var(--hz-color-text-muted);
+}
+
+.empty li {
+	margin-bottom: 2px;
+}
+
+/* ── annotation picker ────────────────────────────────────────────────── */
+
+.highlight {
+	position: fixed;
+	pointer-events: none;
+	border: 2px solid var(--hz-intent-primary);
+	border-radius: var(--hz-radius-sm);
+	background: color-mix(in srgb, var(--hz-intent-primary) 12%, transparent);
+	box-shadow: 0 0 0 1px color-mix(in srgb, var(--hz-color-surface) 60%, transparent);
+	/* Only opacity — transitioning geometry makes the box lag the cursor. */
+	transition: opacity 160ms var(--hz-ease-out);
+}
+
+/* left/top are set by makeDraggable — it opens anchored under the pill and
+ * then rests wherever it is dropped. */
+.composer {
+	position: fixed;
+	display: none;
+	pointer-events: auto;
+	cursor: grab;
+	transition: transform var(--hz-duration-fast) var(--hz-ease-standard),
+		opacity var(--hz-duration-fast) var(--hz-ease-standard);
+}
+
+.composer .heading {
+	margin-bottom: var(--hz-space-near);
+}
+
+.target {
+	margin-bottom: var(--hz-space-near);
+	padding: 4px 8px;
+	border-radius: var(--hz-radius-sm);
+	background: var(--hz-color-surface-muted);
+	color: var(--hz-color-text-muted);
+	font-family: var(--hz-font-family-mono);
+	font-size: 0.75rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+textarea {
+	display: block;
+	width: 100%;
+	min-height: 92px;
+	resize: vertical;
+	font: inherit;
+	padding: 8px 10px;
+	border-radius: var(--hz-radius-sm);
+	border: 1px solid var(--opc-hairline);
+	background: var(--hz-color-surface);
+	color: var(--hz-color-text);
+}
+
+textarea::placeholder {
+	color: var(--hz-color-text-muted);
+}
+
+textarea:focus-visible {
+	outline: 2px solid var(--hz-intent-primary);
+	outline-offset: -1px;
+	border-color: transparent;
+}
+
+.actions {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--hz-space-near);
+	margin-top: var(--hz-space-near);
+}
+
+.toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin-right: auto;
+	color: var(--hz-color-text-muted);
+	font-size: 0.75rem;
+	cursor: pointer;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.toggle:hover {
+	color: var(--hz-color-text);
+}
+
+/* Grid centring does the positioning, so the tick has no margin/offset guesses
+ * in it — those were what made the spacing look off. */
+.toggle input {
+	appearance: none;
+	display: grid;
+	place-content: center;
+	flex: none;
+	width: 15px;
+	height: 15px;
+	margin: 0;
+	border-radius: var(--hz-radius-sm);
+	border: 1px solid var(--hz-color-border);
+	background: var(--hz-color-surface);
+	cursor: pointer;
+	transition: background-color var(--hz-duration-fast) var(--hz-ease-standard),
+		border-color var(--hz-duration-fast) var(--hz-ease-standard);
+}
+
+.toggle input:checked {
+	background: var(--hz-intent-primary);
+	border-color: var(--hz-intent-primary);
+}
+
+/* Tick is two borders of an empty box rotated 45°. Drawn in --hz-color-surface
+ * so it stays legible when dark mode lightens the intent hue. The 1px rise is
+ * optical, not geometric: a rotated L sits low in its own box. */
+.toggle input::after {
+	content: '';
+	width: 3.5px;
+	height: 7px;
+	margin-top: -2px;
+	transform: rotate(45deg);
+	border: solid var(--hz-color-surface);
+	border-width: 0 2px 2px 0;
+	opacity: 0;
+	transition: opacity var(--hz-duration-fast) var(--hz-ease-standard);
+}
+
+.toggle input:checked::after {
+	opacity: 1;
+}
+
+.toggle input:focus-visible {
+	outline: 2px solid var(--hz-intent-primary);
+	outline-offset: 2px;
+}
+
+/* ── error toast ──────────────────────────────────────────────────────── */
+
+.toast {
+	position: fixed;
+	right: var(--hz-space-away);
+	bottom: var(--hz-space-away);
+	max-width: 360px;
+	padding: 10px 14px;
+	border-radius: var(--hz-radius-md);
+	border-left: 3px solid var(--hz-intent-danger);
+	transform: translateX(calc(100% + 40px));
+	opacity: 0;
+	transition: transform var(--hz-duration-fast) var(--hz-ease-standard),
+		opacity var(--hz-duration-fast) var(--hz-ease-standard);
+}
+
+.toast[data-shown] {
+	transform: translateX(0);
+	opacity: 1;
+}
+
+.toast-title {
+	font-weight: var(--hz-font-weight-semibold);
+	margin-bottom: 2px;
+}
+
+.toast-body {
+	color: var(--hz-color-text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		transition: none !important;
+	}
+}

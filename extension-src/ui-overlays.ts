@@ -1,6 +1,7 @@
 import { warnExtension } from "./logger.js"
+import type { TabClaim } from "./types.js"
 
-export async function injectConnectionOverlay(tabId: number): Promise<void> {
+export async function injectConnectionOverlay(tabId: number, claim?: TabClaim): Promise<void> {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -11,23 +12,38 @@ export async function injectConnectionOverlay(tabId: number): Promise<void> {
     await chrome.scripting.executeScript({
       target: { tabId },
       world: "ISOLATED",
-      func: () => {
+      args: [claim?.sessionLabel || claim?.sessionId || "agent session", claim?.queued || 0, claim?.position || null],
+      func: (sessionLabel: string, queued: number, position: OpcPosition | null) => {
+        const shadow = globalThis.__opc_shadow
         const renderPill = globalThis.__opc_renderPill
-        if (typeof renderPill !== "function") {
-          throw new Error("Annotation pill helper is unavailable")
+        if (typeof shadow !== "function" || typeof renderPill !== "function") {
+          throw new Error("Annotation UI helpers are unavailable")
         }
-
-        let overlay = document.getElementById("__opc_connection_overlay")
-        if (!overlay) {
-          overlay = document.createElement("div")
-          overlay.id = "__opc_connection_overlay"
-          document.documentElement.appendChild(overlay)
-        }
-        renderPill(overlay, "Connected")
+        const { host, root } = shadow("__opc_connection_overlay", "dock")
+        renderPill(root, host, sessionLabel, queued, position)
       },
     })
   } catch (error) {
     warnExtension("Failed to inject connection overlay", { tabId, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+/** Updates the pill's queue badge in place — no re-render, no dock reset. */
+export async function setConnectionOverlayQueue(tabId: number, queued: number): Promise<void> {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "ISOLATED",
+      args: [queued],
+      func: (count: number) => {
+        const badge = document
+          .getElementById("__opc_connection_overlay")
+          ?.shadowRoot?.querySelector("[data-role='queue']") as HTMLElement | null
+        if (badge) globalThis.__opc_setQueueBadge?.(badge, count)
+      },
+    })
+  } catch {
+    // Tab may have closed or the pill may not be mounted yet.
   }
 }
 
@@ -70,40 +86,30 @@ export async function showAnnotationError(tabId: number, message: string): Promi
   await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
+    files: ["injected/dom.js"],
+  })
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "ISOLATED",
     args: [message],
     func: (errorMessage: string) => {
-      const existing = document.getElementById("__opc_annotation_error")
-      if (existing) existing.remove()
+      const h = globalThis.__opc_h!
+      const shadow = globalThis.__opc_shadow!
+      if (typeof h !== "function" || typeof shadow !== "function") return
 
-      const panel = document.createElement("div")
-      panel.id = "__opc_annotation_error"
-      panel.textContent = `Annotation failed: ${errorMessage}`
-      panel.style.cssText = [
-        "position:fixed",
-        "right:16px",
-        "bottom:16px",
-        "z-index:2147483647",
-        "max-width:360px",
-        "padding:12px 14px",
-        "border-radius:10px",
-        "background:#7f1d1d",
-        "color:#fee2e2",
-        "border:1px solid rgba(254,202,202,0.45)",
-        "box-shadow:0 10px 30px rgba(0,0,0,0.35)",
-        "font:13px/1.4 ui-sans-serif,system-ui,sans-serif",
-        "transform:translateX(calc(100% + 40px))",
-        "opacity:0",
-        "transition:transform 180ms cubic-bezier(.2,.8,.2,1), opacity 160ms ease",
-      ].join(";")
-      document.documentElement.appendChild(panel)
-      requestAnimationFrame(() => {
-        panel.style.transform = "translateX(0)"
-        panel.style.opacity = "1"
-      })
+      document.getElementById("__opc_annotation_error")?.remove()
+      const { host, root } = shadow("__opc_annotation_error", "picker")
+
+      const toast = h("div", { attrs: { class: "surface toast" } }, [
+        h("div", { text: "Annotation failed", attrs: { class: "toast-title" } }),
+        h("div", { text: errorMessage, attrs: { class: "toast-body" } }),
+      ])
+      root.replaceChildren(toast)
+
+      requestAnimationFrame(() => toast.setAttribute("data-shown", ""))
       setTimeout(() => {
-        panel.style.transform = "translateX(calc(100% + 40px))"
-        panel.style.opacity = "0"
-        setTimeout(() => panel.remove(), 220)
+        toast.removeAttribute("data-shown")
+        setTimeout(() => host.remove(), 300)
       }, 7000)
     },
   })

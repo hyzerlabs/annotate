@@ -40,4 +40,7 @@ await build({
   format: "esm",
   platform: "browser",
   target: "chrome120",
+  // CSS is inlined as a string and adopted into a shadow root at runtime, so
+  // it never reaches the annotated page's stylesheets.
+  loader: { ".css": "text" },
 })

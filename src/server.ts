@@ -153,7 +153,11 @@ function formatAnnotation(entry: QueuedAnnotation, index: number): string {
     lines.push("- Scope: whole page (no element selected)")
   }
 
-  if (entry.screenshotPath) lines.push(`- Screenshot: ${describeScreenshot(entry)}`)
+  lines.push(
+    entry.screenshotPath
+      ? `- Screenshot: ${describeScreenshot(entry)}`
+      : "- Screenshot: none (the user chose not to include one)"
+  )
   return lines.join("\n")
 }
 

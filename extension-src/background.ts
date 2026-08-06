@@ -5,6 +5,7 @@ import {
   injectConnectionOverlay,
   removeConnectionOverlay,
   setConnectionOverlayHidden,
+  setConnectionOverlayQueue,
   showAnnotationError,
 } from "./ui-overlays.js"
 import { showSessionPicker } from "./session-picker.js"
@@ -12,7 +13,13 @@ import { runAnnotationPicker } from "./annotation-picker.js"
 import { captureElement, captureFullPage } from "./capture.js"
 import { createConnectionMonitor } from "./connection-monitor.js"
 import { createClaimsStore } from "./claims-store.js"
-import type { AnnotationMode, AnnotationPayload, ExtensionMessage, SessionInfo } from "./types.js"
+import type {
+  AnnotationMode,
+  AnnotationPayload,
+  AnnotationScreenshot,
+  ExtensionMessage,
+  SessionInfo,
+} from "./types.js"
 
 const claimedTabs = createClaimsStore()
 const extensionVersion = chrome.runtime.getManifest().version
@@ -20,6 +27,7 @@ const extensionVersion = chrome.runtime.getManifest().version
 const monitor = createConnectionMonitor({
   claimedTabs,
   removeConnectionOverlay,
+  setConnectionOverlayQueue,
   extensionVersion,
 })
 
@@ -29,6 +37,7 @@ const MESSAGE_TYPE = {
   CONNECT_TAB: "connect_tab_to_session",
   DISCONNECT_TAB: "disconnect_tab",
   REFRESH_SESSIONS: "refresh_sessions",
+  OVERLAY_MOVED: "overlay_moved",
 } as const
 
 function isSupportedMessage(message: unknown): message is ExtensionMessage {
@@ -85,6 +94,14 @@ async function runMessageAction(message: ExtensionMessage, tab: chrome.tabs.Tab)
     return { ok: true, disconnected }
   }
 
+  if (message.type === "overlay_moved") {
+    // Stored on the claim, which already persists to chrome.storage.session,
+    // so a reload or navigation re-injects the pill where it was left.
+    const claim = claimedTabs.get(tab?.id)
+    if (claim && tab.id) claimedTabs.set(tab.id, { ...claim, position: message.position })
+    return { ok: true }
+  }
+
   if (message.type === "refresh_sessions") {
     const { sessions, context } = await requestSessionState()
     if (!tab.id) throw new Error("No active tab found")
@@ -127,15 +144,17 @@ async function claimTabForSession(tab: chrome.tabs.Tab, session: SessionInfo): P
 
   await postJson(session.baseUrl, "/claim", claimRequestBody(tab.id, session.id))
 
-  claimedTabs.set(tab.id, {
+  const claim = {
     sessionId: session.id,
     sessionLabel: sessionLabel(session),
     baseUrl: session.baseUrl,
     origin: toOriginPattern(tab.url),
     extensionVersion,
-  })
+    queued: 0,
+  }
+  claimedTabs.set(tab.id, claim)
 
-  await injectConnectionOverlay(tab.id)
+  await injectConnectionOverlay(tab.id, claim)
   monitor.ensure()
 
   logExtension("Connected tab to agent session", {
@@ -193,25 +212,29 @@ async function startAnnotationMode(
   const picked = await runAnnotationPicker(tab.id, mode)
   if (!picked || picked.cancelled === true) return { cancelled: true }
 
-  logExtension("Capturing annotation screenshot", { tabId: tab.id, windowId: tab.windowId, mode })
-  // Our own pill would otherwise land in every shot.
-  await setConnectionOverlayHidden(tab.id, true)
-  let screenshot
-  try {
-    screenshot =
-      mode === "page" || !picked.element
-        ? await captureFullPage(tab)
-        : await captureElement(tab, picked.element, picked.viewport)
-  } finally {
-    await setConnectionOverlayHidden(tab.id, false)
+  let screenshot: AnnotationScreenshot | null = null
+  if (picked.includeScreenshot) {
+    logExtension("Capturing annotation screenshot", { tabId: tab.id, windowId: tab.windowId, mode })
+    // Our own pill would otherwise land in every shot.
+    await setConnectionOverlayHidden(tab.id, true)
+    try {
+      screenshot =
+        mode === "page" || !picked.element
+          ? await captureFullPage(tab)
+          : await captureElement(tab, picked.element, picked.viewport)
+    } finally {
+      await setConnectionOverlayHidden(tab.id, false)
+    }
+    logExtension("Captured annotation screenshot", {
+      tabId: tab.id,
+      mode: screenshot.mode,
+      cropped: screenshot.cropped,
+      truncated: screenshot.truncated,
+      bytesApprox: Math.round((screenshot.dataUrl.length * 3) / 4),
+    })
+  } else {
+    logExtension("Screenshot skipped by user", { tabId: tab.id, mode })
   }
-  logExtension("Captured annotation screenshot", {
-    tabId: tab.id,
-    mode: screenshot.mode,
-    cropped: screenshot.cropped,
-    truncated: screenshot.truncated,
-    bytesApprox: Math.round((screenshot.dataUrl.length * 3) / 4),
-  })
 
   const annotationPayload: AnnotationPayload = {
     comment: picked.comment || "",
@@ -236,16 +259,35 @@ async function startAnnotationMode(
     throw new Error("Tab is not connected to an annotation server")
   }
 
-  const annotationResponse = await postJson(claim.baseUrl, "/annotation", {
-    ...claimRequestBody(tab.id, claim.sessionId),
-    annotation: annotationPayload,
-  })
+  const annotationResponse = await postJson<{ sessionId?: string; queued?: number }>(
+    claim.baseUrl,
+    "/annotation",
+    {
+      ...claimRequestBody(tab.id, claim.sessionId),
+      annotation: annotationPayload,
+    }
+  )
 
-  logExtension("Annotation delivered to annotation server", { tabId: tab.id, baseUrl: claim.baseUrl })
   logExtension("Annotation accepted by annotation server", {
     tabId: tab.id,
+    baseUrl: claim.baseUrl,
     sessionId: annotationResponse?.sessionId,
+    queued: annotationResponse?.queued,
   })
+
+  // The POST response carries the new depth, so the badge updates immediately
+  // rather than waiting for the next monitor poll. Every tab on this server
+  // shares the queue, so they all move together.
+  const queued = Number(annotationResponse?.queued)
+  if (Number.isFinite(queued)) {
+    await Promise.allSettled(
+      Array.from(claimedTabs.entries()).map(async ([claimedTabId, claimed]) => {
+        if (claimed.baseUrl !== claim.baseUrl) return
+        claimedTabs.set(claimedTabId, { ...claimed, queued })
+        await setConnectionOverlayQueue(claimedTabId, queued)
+      })
+    )
+  }
 
   return { cancelled: false }
 }
@@ -266,12 +308,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
     return
   }
 
-  injectConnectionOverlay(tabId)
+  injectConnectionOverlay(tabId, claim)
 })
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
   const claim = claimedTabs.get(tabId)
-  if (claim) injectConnectionOverlay(tabId)
+  if (claim) injectConnectionOverlay(tabId, claim)
 })
 
 async function restoreClaimState() {
@@ -285,7 +327,7 @@ async function restoreClaimState() {
         claimedTabs.delete(tabId)
         continue
       }
-      await injectConnectionOverlay(tabId)
+      await injectConnectionOverlay(tabId, claim)
     } catch {
       claimedTabs.delete(tabId)
     }

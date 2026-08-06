@@ -114,15 +114,16 @@ export async function requestSessions(): Promise<SessionInfo[]> {
   return (await requestSessionState()).sessions
 }
 
-export async function checkServerStatus(baseUrl: string, timeoutMs: number): Promise<boolean> {
+/** The status payload when the server is one of ours, null when it is not reachable. */
+export async function fetchServerStatus(baseUrl: string, timeoutMs: number): Promise<InstanceStatus | null> {
   try {
     const result = await fetchJson<InstanceStatus>(`${baseUrl}/status`, {
       timeoutMs,
       throwOnHttp: false,
     })
-    if (!result.ok) return false
-    return result.payload?.app === APP_ID
+    if (!result.ok || result.payload?.app !== APP_ID) return null
+    return result.payload
   } catch {
-    return false
+    return null
   }
 }

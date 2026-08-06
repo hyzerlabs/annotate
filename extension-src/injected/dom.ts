@@ -1,3 +1,8 @@
+import tokensCss from "@hyzer-labs/ui/tokens.css"
+import { anchorPosition } from "../geometry.js"
+import { scopeTokensToHost } from "../token-scope.js"
+import overlayCss from "./overlay.css"
+
 globalThis.__opc_h = function h(tag: string, { text, style, attrs, on }: OpcElementOptions = {}, children: Node[] = []) {
   const node = document.createElement(tag)
   if (text !== undefined) node.textContent = text
@@ -18,45 +23,50 @@ globalThis.__opc_h = function h(tag: string, { text, style, attrs, on }: OpcElem
   return node
 }
 
-// The collapsed pill has two renderers' worth of history: it used to be built
-// both here-ish (on first connect) and by the session picker, and only one of
-// them grew a close button. One renderer now, used by both.
-globalThis.__opc_renderPill = function renderPill(overlay: HTMLElement, labelText: string) {
-  const h = globalThis.__opc_h!
-  const makeDockable = globalThis.__opc_makeDockable!
-  if (typeof h !== "function" || typeof makeDockable !== "function") {
-    throw new Error("Annotation UI helpers are unavailable")
-  }
+let sheet: CSSStyleSheet | null = null
 
-  const STYLE = {
-    pill: [
-      "position:fixed",
-      "left:50%",
-      "z-index:2147483647",
-      "transform:translateX(-50%)",
-      "display:flex",
-      "align-items:center",
-      "gap:8px",
-      "padding:6px 8px 6px 10px",
-      "border-radius:999px",
-      "background:rgba(15,23,42,0.92)",
-      "color:#bbf7d0",
-      "border:1px solid rgba(34,197,94,0.45)",
-      "box-shadow:0 8px 24px rgba(0,0,0,0.22)",
-      "font:12px/1.2 ui-sans-serif,system-ui,sans-serif",
-      "pointer-events:auto",
-      "backdrop-filter:blur(8px)",
-      "cursor:grab",
-      "user-select:none",
-      "-webkit-user-select:none",
-    ].join(";"),
-    label: "font-weight:600;",
-    primary:
-      "border:0;border-radius:999px;padding:4px 8px;background:#22c55e;color:#052e16;font:600 11px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;",
-    secondary:
-      "border:1px solid rgba(34,197,94,0.45);border-radius:999px;padding:3px 8px;background:transparent;color:#bbf7d0;font:600 11px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;",
-    close:
-      "display:inline-flex;align-items:center;justify-content:center;border:0;padding:0 2px;background:transparent;color:#bbf7d0;cursor:pointer;",
+function overlaySheet(): CSSStyleSheet {
+  if (!sheet) {
+    sheet = new CSSStyleSheet()
+    sheet.replaceSync(`${scopeTokensToHost(tokensCss)}\n${overlayCss}`)
+  }
+  return sheet
+}
+
+/**
+ * A shadow root for one of our overlays, keyed by host id. Styles are adopted
+ * into the shadow root and the host is reset with `all: initial`, so nothing
+ * leaks in either direction between the tool and the page it is annotating.
+ *
+ * Returns the existing pair if the host is already on the page.
+ */
+globalThis.__opc_shadow = function shadow(hostId: string, kind: "dock" | "picker") {
+  const existing = document.getElementById(hostId)
+  if (existing?.shadowRoot) return { host: existing, root: existing.shadowRoot, existed: true }
+
+  const host = existing || document.createElement("div")
+  host.id = hostId
+  host.dataset.overlay = kind
+  const root = host.attachShadow({ mode: "open" })
+  root.adoptedStyleSheets = [overlaySheet()]
+  if (!existing) document.documentElement.appendChild(host)
+  return { host, root, existed: false }
+}
+
+// One renderer for the collapsed pill. It used to be built both by the overlay
+// injector and by the session picker, and only the former grew a disconnect
+// button, so it was usually absent.
+globalThis.__opc_renderPill = function renderPill(
+  root: ShadowRoot,
+  host: HTMLElement,
+  sessionLabel: string,
+  queued: number,
+  position?: OpcPosition | null
+) {
+  const h = globalThis.__opc_h!
+  const makeDraggable = globalThis.__opc_makeDraggable!
+  if (typeof h !== "function" || typeof makeDraggable !== "function") {
+    throw new Error("Annotation UI helpers are unavailable")
   }
 
   function send(type: string) {
@@ -72,59 +82,122 @@ globalThis.__opc_renderPill = function renderPill(overlay: HTMLElement, labelTex
   function closeIcon() {
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
     svg.setAttribute("viewBox", "0 0 12 12")
-    svg.setAttribute("width", "12")
-    svg.setAttribute("height", "12")
+    svg.setAttribute("width", "11")
+    svg.setAttribute("height", "11")
     svg.setAttribute("aria-hidden", "true")
 
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
-    path.setAttribute("d", "M2 2 L10 10 M10 2 L2 10")
+    path.setAttribute("d", "M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5")
     path.setAttribute("stroke", "currentColor")
-    path.setAttribute("stroke-width", "1.8")
+    path.setAttribute("stroke-width", "1.6")
     path.setAttribute("stroke-linecap", "round")
     svg.appendChild(path)
     return svg
   }
 
-  overlay.innerHTML = ""
-  overlay.style.cssText = STYLE.pill
-  makeDockable(overlay, { blockDragSelector: "button", snapThreshold: 10 }).applyDockPosition(overlay.dataset.dock)
+  const status = h("span", { attrs: { class: "status", "data-role": "label" } }, [
+    h("span", { text: "Connected:" }),
+    h("span", { text: sessionLabel, attrs: { class: "session", title: sessionLabel } }),
+  ])
 
-  overlay.appendChild(h("span", { text: labelText, style: STYLE.label, attrs: { "data-role": "label" } }))
-  overlay.appendChild(
-    h("button", {
-      text: "Annotate",
-      style: STYLE.primary,
-      attrs: { type: "button", title: "Pick an element and comment on it" },
-      on: { click: send("start_annotation_from_overlay") },
-    })
+  root.replaceChildren(
+    h("div", { attrs: { class: "surface pill" } }, [
+      h("div", { attrs: { class: "pill-row" } }, [
+        status,
+        h("span", { attrs: { class: "spacer" } }),
+        h(
+          "button",
+          {
+            attrs: {
+              class: "btn-icon btn-icon-danger",
+              type: "button",
+              "aria-label": "Disconnect tab",
+              title: "Disconnect this tab",
+            },
+            on: { click: send("disconnect_tab") },
+          },
+          [closeIcon()]
+        ),
+      ]),
+      h("div", { attrs: { class: "pill-row pill-row-actions" } }, [
+        h("button", {
+          text: "Annotate",
+          attrs: { class: "btn btn-primary", type: "button", title: "Pick an element and comment on it" },
+          on: { click: send("start_annotation_from_overlay") },
+        }),
+        h("button", {
+          text: "Capture",
+          attrs: { class: "btn btn-secondary", type: "button", title: "Comment on a screenshot of the whole page" },
+          on: { click: send("start_capture_from_overlay") },
+        }),
+        h("span", { attrs: { class: "spacer" } }),
+        globalThis.__opc_queueBadge!(queued),
+      ]),
+    ])
   )
-  overlay.appendChild(
-    h("button", {
-      text: "Capture",
-      style: STYLE.secondary,
-      attrs: { type: "button", title: "Comment on a screenshot of the whole page" },
-      on: { click: send("start_capture_from_overlay") },
-    })
-  )
-  overlay.appendChild(
-    h(
-      "button",
-      {
-        style: STYLE.close,
-        attrs: { type: "button", "aria-label": "Disconnect tab", title: "Disconnect this tab" },
-        on: { click: send("disconnect_tab") },
-      },
-      [closeIcon()]
-    )
+
+  // Reported on drop so the position survives navigation and re-injection.
+  makeDraggable(host, {
+    blockDragSelector: "button",
+    onDrop: (dropped) => {
+      try {
+        chrome.runtime.sendMessage({ type: "overlay_moved", position: dropped })
+      } catch {}
+    },
+  }).applyPosition(position)
+}
+
+/**
+ * Queue depth badge. Built here and updated in place by setConnectionOverlayQueue,
+ * so a new count does not cost a full pill re-render.
+ */
+globalThis.__opc_queueBadge = function queueBadge(queued: number) {
+  const h = globalThis.__opc_h!
+  const badge = h("span", { attrs: { class: "queue", "data-role": "queue" } }, [
+    h("span", { attrs: { class: "queue-count", "data-role": "queue-count" } }),
+    h("span", { text: "queued" }),
+  ])
+  globalThis.__opc_setQueueBadge!(badge, queued)
+  return badge
+}
+
+globalThis.__opc_setQueueBadge = function setQueueBadge(badge: HTMLElement, queued: number) {
+  const count = badge.querySelector("[data-role='queue-count']")
+  if (count) count.textContent = String(queued)
+  badge.toggleAttribute("hidden", queued < 1)
+}
+
+const DRAG_MARGIN = 8
+
+/**
+ * Anchors `floating` to `trigger`, flipping above when there is no room below.
+ * `floating` must already be displayed — an undisplayed element measures 0 tall
+ * and would always look like it fits below.
+ */
+globalThis.__opc_anchorTo = function anchorTo(trigger: Element, floating: HTMLElement) {
+  const triggerRect = trigger.getBoundingClientRect()
+  const floatingRect = floating.getBoundingClientRect()
+  return anchorPosition(
+    { x: triggerRect.left, y: triggerRect.top, width: triggerRect.width, height: triggerRect.height },
+    { width: floatingRect.width, height: floatingRect.height },
+    { width: window.innerWidth, height: window.innerHeight }
   )
 }
 
-globalThis.__opc_makeDockable = function makeDockable(overlay: HTMLElement, options = {}) {
+/**
+ * Free dragging: an overlay rests wherever it is dropped. It used to snap back
+ * to top- or bottom-centre on release, which threw away the position you just
+ * chose.
+ *
+ * Position is always left/top in viewport pixels, clamped so the overlay can
+ * never be dragged (or resized) out of reach.
+ */
+globalThis.__opc_makeDraggable = function makeDraggable(overlay: HTMLElement, options = {}) {
   if (!overlay) throw new Error("overlay is required")
-  if (overlay.__opcDockApi) return overlay.__opcDockApi
+  if (overlay.__opcDragApi) return overlay.__opcDragApi
 
   const blockDragSelector = options.blockDragSelector || "button"
-  const snapThreshold = Number.isFinite(options.snapThreshold) ? options.snapThreshold : 10
+  const onDrop = options.onDrop
 
   let dragging = false
   let pointerId: number | null = null
@@ -135,23 +208,42 @@ globalThis.__opc_makeDockable = function makeDockable(overlay: HTMLElement, opti
     return Math.max(min, Math.min(max, value))
   }
 
-  function applyDockPosition(dock?: string): void {
-    const next = dock === "bottom" ? "bottom" : "top"
-    overlay.dataset.dock = next
-    overlay.style.left = "50%"
-    overlay.style.transform = "translateX(-50%)"
-    if (next === "bottom") {
-      overlay.style.top = ""
-      overlay.style.bottom = `${snapThreshold}px`
-    } else {
-      overlay.style.bottom = ""
-      overlay.style.top = `${snapThreshold}px`
+  function clampToViewport(left: number, top: number): OpcPosition {
+    const rect = overlay.getBoundingClientRect()
+    return {
+      left: clamp(left, DRAG_MARGIN, Math.max(DRAG_MARGIN, window.innerWidth - rect.width - DRAG_MARGIN)),
+      top: clamp(top, DRAG_MARGIN, Math.max(DRAG_MARGIN, window.innerHeight - rect.height - DRAG_MARGIN)),
     }
+  }
+
+  // event.target is retargeted to the shadow host for anything inside the
+  // shadow tree, so closest() on it would never see our controls. The composed
+  // path still has the real element.
+  function hitsBlockedControl(event: Event): boolean {
+    return event.composedPath().some((node) => node instanceof Element && node.matches(blockDragSelector))
+  }
+
+  function getPosition(): OpcPosition {
+    const rect = overlay.getBoundingClientRect()
+    return { left: rect.left, top: rect.top }
+  }
+
+  /** Falls back to top-centre, which is where the pill has always started. */
+  function applyPosition(position?: OpcPosition | null): OpcPosition {
+    const rect = overlay.getBoundingClientRect()
+    const wanted = position || { left: (window.innerWidth - rect.width) / 2, top: DRAG_MARGIN }
+    const next = clampToViewport(wanted.left, wanted.top)
+    overlay.style.right = ""
+    overlay.style.bottom = ""
+    overlay.style.transform = ""
+    overlay.style.left = `${Math.round(next.left)}px`
+    overlay.style.top = `${Math.round(next.top)}px`
+    return next
   }
 
   overlay.addEventListener("pointerdown", (event: PointerEvent) => {
     if (event.button !== 0) return
-    if (event.target instanceof Element && event.target.closest(blockDragSelector)) return
+    if (hitsBlockedControl(event)) return
     event.preventDefault()
     dragging = true
     pointerId = event.pointerId
@@ -165,19 +257,17 @@ globalThis.__opc_makeDockable = function makeDockable(overlay: HTMLElement, opti
   overlay.addEventListener("pointermove", (event: PointerEvent) => {
     if (!dragging) return
     event.preventDefault()
-    const rect = overlay.getBoundingClientRect()
-    const nextLeft = clamp(event.clientX - offsetX, 8, window.innerWidth - rect.width - 8)
-    const nextTop = clamp(event.clientY - offsetY, 8, window.innerHeight - rect.height - 8)
-    overlay.style.left = `${Math.round(nextLeft)}px`
+    const next = clampToViewport(event.clientX - offsetX, event.clientY - offsetY)
     overlay.style.transform = ""
+    overlay.style.right = ""
     overlay.style.bottom = ""
-    overlay.style.top = `${Math.round(nextTop)}px`
+    overlay.style.left = `${Math.round(next.left)}px`
+    overlay.style.top = `${Math.round(next.top)}px`
   })
 
-  overlay.addEventListener("pointerup", (event: PointerEvent) => {
+  function endDrag() {
     if (!dragging) return
     dragging = false
-    applyDockPosition(event.clientY > window.innerHeight / 2 ? "bottom" : "top")
     overlay.style.cursor = "grab"
     if (pointerId !== null) {
       try {
@@ -185,14 +275,19 @@ globalThis.__opc_makeDockable = function makeDockable(overlay: HTMLElement, opti
       } catch {}
     }
     pointerId = null
+    onDrop?.(getPosition())
+  }
+
+  overlay.addEventListener("pointerup", endDrag)
+  overlay.addEventListener("pointercancel", endDrag)
+
+  // A window resize can otherwise strand an overlay outside the viewport with
+  // no way to drag it back.
+  window.addEventListener("resize", () => {
+    if (!overlay.isConnected) return
+    applyPosition(getPosition())
   })
 
-  overlay.addEventListener("pointercancel", () => {
-    dragging = false
-    pointerId = null
-    overlay.style.cursor = "grab"
-  })
-
-  overlay.__opcDockApi = { applyDockPosition }
-  return overlay.__opcDockApi
+  overlay.__opcDragApi = { applyPosition, getPosition }
+  return overlay.__opcDragApi
 }

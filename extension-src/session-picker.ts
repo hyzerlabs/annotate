@@ -2,9 +2,15 @@ import type { SessionInfo, SessionPickerContext } from "./types.js"
 
 function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext) {
   const h = globalThis.__opc_h!
-  const makeDockable = globalThis.__opc_makeDockable!
+  const shadow = globalThis.__opc_shadow!
+  const makeDraggable = globalThis.__opc_makeDraggable!
   const renderPill = globalThis.__opc_renderPill!
-  if (typeof h !== "function" || typeof makeDockable !== "function" || typeof renderPill !== "function") {
+  if (
+    typeof h !== "function" ||
+    typeof shadow !== "function" ||
+    typeof makeDraggable !== "function" ||
+    typeof renderPill !== "function"
+  ) {
     throw new Error("Annotation UI helpers are unavailable")
   }
 
@@ -12,73 +18,27 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
     globalThis.__opc_cleanupSessionPicker()
   }
 
-  const STYLE = {
-    expanded: [
-      "position:fixed",
-      "left:50%",
-      "z-index:2147483647",
-      "transform:translateX(-50%)",
-      "display:block",
-      "width:min(420px,calc(100vw - 20px))",
-      "padding:10px",
-      "border-radius:14px",
-      "background:rgba(15,23,42,0.92)",
-      "color:#bbf7d0",
-      "border:1px solid rgba(34,197,94,0.45)",
-      "box-shadow:0 14px 40px rgba(0,0,0,0.35)",
-      "font:12px/1.35 ui-sans-serif,system-ui,sans-serif",
-      "pointer-events:auto",
-      "backdrop-filter:blur(8px)",
-      "cursor:grab",
-      "user-select:none",
-      "-webkit-user-select:none",
-    ].join(";"),
-    title: "font-weight:700;margin:2px 4px 8px;color:#bbf7d0;",
-    header: "display:flex;align-items:center;justify-content:space-between;gap:8px;margin:2px 2px 8px;",
-    empty: "padding:8px 4px 2px;color:#dcfce7;",
-    emptyTitle: "font-weight:700;margin-bottom:6px;",
-    emptyText: "margin:0 0 8px;color:#86efac;line-height:1.45;",
-    emptyList: "margin:0;padding-left:18px;color:#86efac;line-height:1.5;",
-    retry: "margin-top:10px;border:0;border-radius:999px;padding:6px 10px;background:#22c55e;color:#052e16;font:600 11px/1 ui-sans-serif,system-ui,sans-serif;cursor:pointer;",
-    itemButton: [
-      "display:block",
-      "width:100%",
-      "text-align:left",
-      "padding:7px 2px 7px 4px",
-      "margin:0",
-      "border:0",
-      "border-radius:0",
-      "border-bottom:1px solid rgba(34,197,94,0.2)",
-      "background:transparent",
-      "color:#dcfce7",
-      "cursor:pointer",
-    ].join(";"),
-    itemButtonFocused: [
-      "background:rgba(6,78,59,0.35)",
-    ].join(";"),
-    name: "font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;",
-    meta: "margin-top:2px;color:#86efac;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;opacity:0.92;",
-    close: "display:inline-flex;align-items:center;justify-content:center;border:0;background:transparent;color:#bbf7d0;cursor:pointer;font:700 14px/1 ui-sans-serif,system-ui,sans-serif;padding:0 2px;",
+  function closeIcon() {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    svg.setAttribute("viewBox", "0 0 12 12")
+    svg.setAttribute("width", "11")
+    svg.setAttribute("height", "11")
+    svg.setAttribute("aria-hidden", "true")
+
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
+    path.setAttribute("d", "M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5")
+    path.setAttribute("stroke", "currentColor")
+    path.setAttribute("stroke-width", "1.6")
+    path.setAttribute("stroke-linecap", "round")
+    svg.appendChild(path)
+    return svg
   }
 
-  function ensureOverlay() {
-    let overlay = document.getElementById("__opc_connection_overlay")
-    const existed = !!overlay
-
-    if (!overlay) {
-      overlay = h("div", { attrs: { id: "__opc_connection_overlay" } })
-      document.documentElement.appendChild(overlay)
-    }
-
-    return { overlay, existed }
-  }
-
-  function sessionButton(onSelect: () => void, item: SessionInfo) {
+  function sessionButton(item: SessionInfo, onSelect: () => void) {
     return h(
       "button",
       {
-        style: STYLE.itemButton,
-        attrs: { type: "button", "data-role": "session-item" },
+        attrs: { class: "item", type: "button", "data-role": "session-item" },
         on: {
           click: () => {
             try {
@@ -89,11 +49,8 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
         },
       },
       [
-        h("div", { text: item.title || item.id, style: STYLE.name }),
-        h("div", {
-          text: item.directory || item.id,
-          style: STYLE.meta,
-        }),
+        h("div", { text: item.title || item.id, attrs: { class: "item-name" } }),
+        h("div", { text: item.directory || item.id, attrs: { class: "item-meta" } }),
       ]
     )
   }
@@ -101,7 +58,6 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
   function emptyStateContent() {
     if (context.reason === "no-sessions") {
       return {
-        title: "No agent session available",
         text: "The annotation server responded but did not report an active session for this project.",
         steps: [
           "Start your coding agent in the project you want to edit",
@@ -112,8 +68,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
     }
 
     return {
-      title: "Annotation server not found",
-      text: "The extension could not find a local annotation server on ports 39280-39300.",
+      text: "No local annotation server was found on ports 39280-39300.",
       steps: [
         "Add hyzer-annotate to your agent's MCP config",
         "Start your coding agent in the project you want to edit",
@@ -124,80 +79,74 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
 
   function renderEmptyState() {
     const content = emptyStateContent()
-    return h("div", { style: STYLE.empty }, [
-      h("div", { text: content.title, style: STYLE.emptyTitle }),
-      h("p", {
-        text: content.text,
-        style: STYLE.emptyText,
-      }),
-      h("ol", { style: STYLE.emptyList }, content.steps.map((step) => h("li", { text: step }))),
-      h("button", {
-        text: "Try again",
-        style: STYLE.retry,
-        attrs: { type: "button" },
-        on: {
-          click: () => {
-            try {
-              chrome.runtime.sendMessage({ type: "refresh_sessions" })
-            } catch {}
+    return h("div", { attrs: { class: "empty" } }, [
+      h("p", { text: content.text }),
+      h("ol", {}, content.steps.map((step) => h("li", { text: step }))),
+      h("div", { attrs: { class: "actions" } }, [
+        h("button", {
+          text: "Try again",
+          attrs: { class: "btn btn-primary", type: "button" },
+          on: {
+            click: () => {
+              try {
+                chrome.runtime.sendMessage({ type: "refresh_sessions" })
+              } catch {}
+            },
           },
-        },
-      }),
+        }),
+      ]),
     ])
   }
 
-  function createCloseIcon() {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
-    svg.setAttribute("viewBox", "0 0 12 12")
-    svg.setAttribute("width", "12")
-    svg.setAttribute("height", "12")
-    svg.setAttribute("aria-hidden", "true")
-
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
-    path.setAttribute("d", "M2 2 L10 10 M10 2 L2 10")
-    path.setAttribute("stroke", "currentColor")
-    path.setAttribute("stroke-width", "1.8")
-    path.setAttribute("stroke-linecap", "round")
-    svg.appendChild(path)
-    return svg
-  }
-
-  const { overlay, existed } = ensureOverlay()
-  const dockable = makeDockable(overlay, { blockDragSelector: "button", snapThreshold: 10 })
-  const priorLabel = overlay.querySelector("[data-role='label']")?.textContent || "Connected"
-  overlay.style.cssText = STYLE.expanded
-  dockable.applyDockPosition(overlay.dataset.dock)
-  overlay.innerHTML = ""
+  const { host, root, existed } = shadow("__opc_connection_overlay", "dock")
+  // Read the pill's state before it is replaced, so closing restores it.
+  const priorSession = root.querySelector(".session")?.textContent || "agent session"
+  const priorQueued = Number(root.querySelector("[data-role='queue-count']")?.textContent) || 0
+  const drag = makeDraggable(host, {
+    blockDragSelector: "button",
+    onDrop: (dropped) => {
+      try {
+        chrome.runtime.sendMessage({ type: "overlay_moved", position: dropped })
+      } catch {}
+    },
+  })
+  // Expanding makes the overlay taller; keep the position it already had, and
+  // let applyPosition clamp it back into view if it now overflows.
+  const priorPosition = existed ? drag.getPosition() : null
 
   const close = () => {
     cleanupKeyboard()
     if (!existed) {
-      overlay.remove()
+      host.remove()
       return
     }
-    renderPill(overlay, priorLabel)
+    renderPill(root, host, priorSession, priorQueued, priorPosition)
   }
 
-  overlay.appendChild(
-    h("div", { style: STYLE.header }, [
-      h("div", { text: "Connect this tab to an agent session", style: STYLE.title }),
-      h("button", {
-        style: STYLE.close,
-        attrs: { type: "button", "aria-label": "Close session picker" },
-        on: { click: close },
-      }, [createCloseIcon()]),
+  const heading = items.length ? "Connect this tab to an agent session" : "No agent session available"
+
+  root.replaceChildren(
+    h("div", { attrs: { class: "surface panel" } }, [
+      h("div", { attrs: { class: "header" } }, [
+        h("div", { text: heading, attrs: { class: "heading" } }),
+        h(
+          "button",
+          {
+            attrs: { class: "btn-icon", type: "button", "aria-label": "Close session picker" },
+            on: { click: close },
+          },
+          [closeIcon()]
+        ),
+      ]),
+      items.length
+        ? h("div", { attrs: { class: "list" } }, items.map((item) => sessionButton(item, close)))
+        : renderEmptyState(),
     ])
   )
 
-  if (items.length) {
-    for (const item of items) {
-      overlay.appendChild(sessionButton(close, item))
-    }
-  } else {
-    overlay.appendChild(renderEmptyState())
-  }
+  drag.applyPosition(priorPosition)
 
-  const sessionButtons = Array.from(overlay.querySelectorAll("[data-role='session-item']")) as HTMLElement[]
+  const sessionButtons = Array.from(root.querySelectorAll("[data-role='session-item']")) as HTMLElement[]
   let focusedIndex = sessionButtons.length ? 0 : -1
 
   function setFocusedIndex(nextIndex: number) {
@@ -209,13 +158,13 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
     const count = sessionButtons.length
     focusedIndex = ((nextIndex % count) + count) % count
     sessionButtons.forEach((button, index) => {
-      button.style.cssText = STYLE.itemButton + (index === focusedIndex ? `;${STYLE.itemButtonFocused}` : "")
+      button.toggleAttribute("data-focused", index === focusedIndex)
     })
     sessionButtons[focusedIndex].focus({ preventScroll: true })
   }
 
   function onKeyDown(event: KeyboardEvent) {
-    if (!overlay.isConnected) return
+    if (!host.isConnected) return
     if (event.key === "Escape") {
       event.preventDefault()
       close()

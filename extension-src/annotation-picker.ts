@@ -3,20 +3,25 @@ import type { AnnotationElement, AnnotationMode, AnnotationPickerResult, Annotat
 
 function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerResult> {
   const h = globalThis.__opc_h!
-  if (typeof h !== "function") {
-    throw new Error("Annotation UI helper is unavailable")
+  const shadow = globalThis.__opc_shadow!
+  const makeDraggable = globalThis.__opc_makeDraggable!
+  const anchorTo = globalThis.__opc_anchorTo!
+  if (
+    typeof h !== "function" ||
+    typeof shadow !== "function" ||
+    typeof makeDraggable !== "function" ||
+    typeof anchorTo !== "function"
+  ) {
+    throw new Error("Annotation UI helpers are unavailable")
   }
 
-  const STYLE = {
-    root: "position:fixed;inset:0;z-index:2147483647;pointer-events:none;",
-    box: "position:fixed;border:2px solid rgba(34,197,94,0.95);background:rgba(34,197,94,0.16);box-shadow:0 0 0 1px rgba(34,197,94,0.45);pointer-events:none;",
-    panel: "position:fixed;right:16px;bottom:16px;width:320px;padding:12px;background:rgba(15,23,42,0.92);color:#bbf7d0;border:1px solid rgba(34,197,94,0.45);border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.35);font:12px/1.4 ui-sans-serif,system-ui,sans-serif;pointer-events:auto;display:none;backdrop-filter:blur(8px);",
-    title: "font-weight:600;margin-bottom:8px;",
-    targetInfo: "margin-bottom:8px;color:#86efac;word-break:break-word;",
-    textarea: "width:100%;min-height:96px;resize:vertical;border-radius:10px;border:1px solid rgba(34,197,94,0.35);background:rgba(2,44,34,0.75);color:#dcfce7;padding:10px;box-sizing:border-box;",
-    actions: "display:flex;gap:8px;justify-content:flex-end;margin-top:10px;",
-    cancel: "padding:8px 10px;border-radius:999px;border:1px solid rgba(34,197,94,0.45);background:transparent;color:#bbf7d0;cursor:pointer;",
-    submit: "padding:8px 12px;border-radius:999px;border:0;background:#22c55e;color:#052e16;font-weight:600;cursor:pointer;",
+  // Open against the pill that triggered this, so the composer appears where
+  // the user was already looking. Flips fully above the pill when there is no
+  // room below. Falls back to top-centre if the pill is gone.
+  function composerAnchor(panel: HTMLElement): OpcPosition | null {
+    const pill = document.getElementById("__opc_connection_overlay")
+    if (!pill) return null
+    return anchorTo(pill, panel)
   }
 
   const ROLE_BY_TAG = {
@@ -25,10 +30,6 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
     INPUT: "textbox",
     SELECT: "combobox",
     TEXTAREA: "textbox",
-  }
-
-  function removeExistingRoot() {
-    document.getElementById("__opc_annotation_root")?.remove()
   }
 
   function cssEscape(value: string): string {
@@ -97,37 +98,51 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
   }
 
   function createUI() {
-    const root = h("div", { style: STYLE.root, attrs: { id: "__opc_annotation_root" } })
-    root.id = "__opc_annotation_root"
+    document.getElementById("__opc_annotation_root")?.remove()
+    const { host, root } = shadow("__opc_annotation_root", "picker")
 
-    const box = h("div", { style: STYLE.box })
-    const targetInfo = h("div", { style: STYLE.targetInfo })
-    const textarea = h("textarea", { style: STYLE.textarea }) as HTMLTextAreaElement
-    textarea.placeholder = "What should the agent change here?"
+    const box = h("div", { attrs: { class: "highlight" } })
+    box.style.display = "none"
+
+    const targetInfo = h("div", { attrs: { class: "target" } })
+    const textarea = h("textarea") as HTMLTextAreaElement
+    textarea.placeholder =
+      mode === "page" ? "What should the agent know about this page?" : "What should the agent change here?"
 
     const cancelButton = h("button", {
       text: "Cancel",
-      style: STYLE.cancel,
-      attrs: { type: "button" },
+      attrs: { class: "btn btn-soft-danger", type: "button" },
     }) as HTMLButtonElement
     const submitButton = h("button", {
       text: "Send",
-      style: STYLE.submit,
-      attrs: { type: "button" },
+      attrs: { class: "btn btn-primary", type: "button" },
     }) as HTMLButtonElement
 
-    const panel = h("div", { style: STYLE.panel }, [
-      h("div", { text: mode === "page" ? "Comment on this page" : "Annotate selection", style: STYLE.title }),
-      targetInfo,
-      textarea,
-      h("div", { style: STYLE.actions }, [cancelButton, submitButton]),
+    const screenshotToggle = h("input", { attrs: { type: "checkbox" } }) as HTMLInputElement
+    screenshotToggle.checked = true
+
+    const toggleLabel = h("label", { attrs: { class: "toggle" } }, [
+      screenshotToggle,
+      h("span", { text: mode === "page" ? "Include page screenshot" : "Include screenshot" }),
     ])
 
-    root.appendChild(box)
-    root.appendChild(panel)
-    document.documentElement.appendChild(root)
+    const panel = h("div", { attrs: { class: "surface panel composer" } }, [
+      h("div", {
+        text: mode === "page" ? "Comment on this page" : "Annotate selection",
+        attrs: { class: "heading" },
+      }),
+      targetInfo,
+      textarea,
+      h("div", { attrs: { class: "actions" } }, [toggleLabel, cancelButton, submitButton]),
+    ])
 
-    return { root, box, panel, targetInfo, textarea, cancelButton, submitButton }
+    root.replaceChildren(box, panel)
+
+    // Everything interactive blocks the drag, so text selection in the comment
+    // box still works and buttons stay clickable.
+    const drag = makeDraggable(panel, { blockDragSelector: "button, textarea, input, label" })
+
+    return { host, root, box, panel, targetInfo, textarea, cancelButton, submitButton, screenshotToggle, drag }
   }
 
   function updateHighlight(box: HTMLElement, el: HTMLElement | null): void {
@@ -144,7 +159,6 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
   }
 
   return new Promise((resolve) => {
-    removeExistingRoot()
     const ui = createUI()
 
     const state: { selected: HTMLElement | null; locked: boolean; finished: boolean } = {
@@ -163,7 +177,7 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
       if (state.finished) return
       state.finished = true
       removeListeners()
-      ui.root.remove()
+      ui.host.remove()
       resolve(resultPayload)
     }
 
@@ -175,17 +189,23 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
       ui.cancelButton.disabled = true
       ui.textarea.disabled = true
       ui.submitButton.textContent = "Sending"
-      ui.panel.style.transition = "transform 220ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease"
-      ui.box.style.transition = "opacity 160ms ease"
       requestAnimationFrame(() => {
         ui.panel.style.transform = "translateX(calc(100% + 40px))"
         ui.panel.style.opacity = "0"
         ui.box.style.opacity = "0"
       })
       setTimeout(() => {
-        ui.root.remove()
+        ui.host.remove()
         resolve(resultPayload)
       }, 240)
+    }
+
+    // Position after display: an undisplayed panel measures zero, which would
+    // make every anchor decision look like it fits below.
+    function showComposer() {
+      ui.panel.style.display = "block"
+      ui.drag.applyPosition(composerAnchor(ui.panel))
+      ui.textarea.focus()
     }
 
     function submitAnnotation() {
@@ -198,22 +218,33 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
         comment: ui.textarea.value.trim(),
         element: state.selected ? describeElement(state.selected) : null,
         viewport: describeViewport(),
+        includeScreenshot: ui.screenshotToggle.checked,
       })
+    }
+
+    // elementFromPoint retargets anything inside our shadow tree to the host,
+    // so the host is the only thing we ever need to reject.
+    function elementUnderPointer(event: MouseEvent): HTMLElement | null {
+      const el = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
+      if (!el || el === ui.host || ui.host.contains(el)) return null
+      return el
     }
 
     function onMouseMove(event: MouseEvent) {
       if (state.locked) return
-      const el = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
-      if (!el || ui.root.contains(el)) return
+      const el = elementUnderPointer(event)
+      if (!el) return
       state.selected = el
       updateHighlight(ui.box, el)
     }
 
     function onClick(event: MouseEvent) {
-      if (event.target instanceof Node && ui.panel.contains(event.target)) return
+      // event.target is retargeted to the host too, so the composed path is the
+      // only way to tell a click on the composer from a click on the page.
+      if (event.composedPath().includes(ui.panel)) return
       if (state.locked) return
-      const el = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null
-      if (!el || ui.root.contains(el)) return
+      const el = elementUnderPointer(event)
+      if (!el) return
       event.preventDefault()
       event.stopPropagation()
       event.stopImmediatePropagation()
@@ -221,8 +252,7 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
       state.selected = el
       updateHighlight(ui.box, el)
       ui.targetInfo.textContent = `${el.tagName.toLowerCase()} ${buildSelector(el)}`.trim()
-      ui.panel.style.display = "block"
-      ui.textarea.focus()
+      showComposer()
     }
 
     function onKeyDown(event: KeyboardEvent) {
@@ -245,8 +275,7 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
     if (mode === "page") {
       state.locked = true
       ui.targetInfo.textContent = "Whole page"
-      ui.panel.style.display = "block"
-      ui.textarea.focus()
+      showComposer()
     } else {
       document.addEventListener("mousemove", onMouseMove, true)
       document.addEventListener("click", onClick, true)

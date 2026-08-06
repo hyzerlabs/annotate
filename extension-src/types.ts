@@ -24,7 +24,13 @@ export type TabClaim = {
   baseUrl: string
   origin?: string | null
   extensionVersion?: string
+  /** Last known queue depth on this tab's server, for the pill counter. */
+  queued?: number
+  /** Where the user dragged the pill, so it stays put across navigation. */
+  position?: OverlayPosition | null
 }
+
+export type OverlayPosition = { left: number; top: number }
 
 export type AnnotationElement = {
   selector: string
@@ -59,6 +65,8 @@ export type AnnotationPickerResult =
       comment: string
       element: AnnotationElement | null
       viewport: AnnotationViewport
+      /** Composer checkbox. When off, no capture runs and no image is sent. */
+      includeScreenshot: boolean
     }
 
 export type AnnotationScreenshot = {
@@ -80,7 +88,7 @@ export type AnnotationPayload = {
   }
   element: AnnotationElement | null
   viewport: AnnotationViewport
-  screenshot: AnnotationScreenshot
+  screenshot: AnnotationScreenshot | null
 }
 
 export type ExtensionMessage =
@@ -89,9 +97,11 @@ export type ExtensionMessage =
   | { type: "connect_tab_to_session"; session: SessionInfo }
   | { type: "disconnect_tab" }
   | { type: "refresh_sessions" }
+  | { type: "overlay_moved"; position: OverlayPosition }
 
 export type InstanceStatus = {
   app?: string
+  queued?: number
   [key: string]: unknown
 }
 

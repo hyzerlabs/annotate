@@ -42,6 +42,39 @@ export function planBands(scrollHeight: number, innerHeight: number, maxBands: n
   return { bands, totalBands, truncated: bands < totalBands }
 }
 
+export type AnchorSide = "top" | "bottom"
+export type AnchorResult = { left: number; top: number; side: AnchorSide }
+
+/**
+ * Places a floating panel against a trigger, preferring below and flipping to
+ * fully above when below lacks room — never overlapping the trigger, which is
+ * what clamping a below-position into the viewport would do.
+ *
+ * Aligned to the trigger's left edge, then shifted along that axis to stay
+ * inside `padding`. Same fit/flip/shift shape as @hyzer-labs/ui's `place()`,
+ * which is not reachable: ./positioning is absent from the package exports.
+ */
+export function anchorPosition(
+  trigger: Rect,
+  floating: Size,
+  viewport: Size,
+  offset = 8,
+  padding = 8
+): AnchorResult {
+  const roomBelow = viewport.height - (trigger.y + trigger.height) - offset - padding
+  const roomAbove = trigger.y - offset - padding
+
+  // Below unless it does not fit and above is genuinely roomier — so a panel
+  // too tall for either side still lands on the side with more space.
+  const below = roomBelow >= floating.height || roomBelow >= roomAbove
+  const top = below ? trigger.y + trigger.height + offset : trigger.y - offset - floating.height
+
+  const maxLeft = Math.max(padding, viewport.width - floating.width - padding)
+  const left = Math.min(Math.max(trigger.x, padding), maxLeft)
+
+  return { left, top, side: below ? "bottom" : "top" }
+}
+
 /** Canvas height for a stitch of `bands` bands, in capture pixels. */
 export function stitchHeight(scrollHeight: number, innerHeight: number, bands: number, scale: number): number {
   return Math.round(Math.min(scrollHeight, bands * innerHeight) * scale)
