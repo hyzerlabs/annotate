@@ -102,6 +102,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
   // Read the pill's state before it is replaced, so closing restores it.
   const priorSession = root.querySelector(".session")?.textContent || "agent session"
   const priorQueued = Number(root.querySelector("[data-role='queue-count']")?.textContent) || 0
+  const priorPersist = (root.querySelector("[data-role='persist-input']") as HTMLInputElement | null)?.checked === true
   const drag = makeDraggable(host, {
     blockDragSelector: "button",
     onDrop: (dropped) => {
@@ -120,7 +121,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
       host.remove()
       return
     }
-    renderPill(root, host, priorSession, priorQueued, priorPosition)
+    renderPill(root, host, priorSession, priorQueued, priorPersist, priorPosition)
   }
 
   const heading = items.length ? "Connect this tab to a local agent session" : "No agent session available"

@@ -6,7 +6,8 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
 import { tmpdir } from "node:os"
 import { basename, dirname, join } from "node:path"
 import { createServer, type Server } from "node:http"
@@ -20,13 +21,20 @@ const PORT_START = 39280
 const PORT_END = 39300
 const LISTEN_HOST = "127.0.0.1"
 const CLAIM_TTL_MS = 5 * 60 * 1000
-// ponytail: annotations live in memory only — a queue drained by the agent.
-// If you ever want them to survive an agent restart, persist to ANNOTATION_DIR.
 const QUEUE_LIMIT = 200
+// Screenshots outlive their drain on purpose: get_annotations hands the agent
+// file paths and it reads them afterwards, so deleting on drain would hand out
+// dead paths. Age them out instead, well past any plausible read.
+const SCREENSHOT_TTL_MS = 6 * 60 * 60 * 1000
 
 const BASE_DIR = getRuntimeBaseDir()
 const LOG_PATH = join(BASE_DIR, "server.log")
 const ANNOTATION_DIR = join(BASE_DIR, "annotations")
+// A user preference, not a project one, so it is shared by every server.
+const SETTINGS_PATH = join(BASE_DIR, "settings.json")
+// Keyed by working directory, not sessionId: sessionId embeds the pid, which
+// changes on the very restart the queue is meant to survive.
+const QUEUE_PATH = join(BASE_DIR, `queue-${createHash("sha256").update(process.cwd()).digest("hex").slice(0, 12)}.json`)
 
 const sessionId = `${APP_ID}:${process.pid}`
 const directory = process.cwd()
@@ -48,7 +56,71 @@ type QueuedAnnotation = {
 const queue: QueuedAnnotation[] = []
 const claims = new Map<number, { sessionId: string; claimedAt: string; lastSeenAt: string; extensionVersion?: string }>()
 
+// Off by default: an agent that pulls its queue on demand should not leave
+// feedback lying around on disk unless the user asked for that.
+let persistQueue = false
+
+function readSettings(): void {
+  try {
+    const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf8"))
+    persistQueue = settings?.persistQueue === true
+  } catch {
+    // no settings yet, keep the default
+  }
+}
+
+function writeSettings(): void {
+  try {
+    mkdirSync(BASE_DIR, { recursive: true, mode: 0o700 })
+    writeFileSync(SETTINGS_PATH, JSON.stringify({ persistQueue }, null, 2), { mode: 0o600 })
+  } catch (error) {
+    logDebug(`could not write settings: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function saveQueue(): void {
+  if (!persistQueue) return
+  try {
+    mkdirSync(BASE_DIR, { recursive: true, mode: 0o700 })
+    writeFileSync(QUEUE_PATH, JSON.stringify(queue), { mode: 0o600 })
+  } catch (error) {
+    logDebug(`could not persist queue: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+function discardSavedQueue(): void {
+  try {
+    rmSync(QUEUE_PATH, { force: true })
+  } catch {
+    // nothing to discard
+  }
+}
+
+function restoreQueue(): void {
+  if (!persistQueue) return
+  try {
+    const saved = JSON.parse(readFileSync(QUEUE_PATH, "utf8"))
+    if (!Array.isArray(saved)) return
+    queue.push(...saved.slice(0, QUEUE_LIMIT))
+    logDebug(`restored ${queue.length} annotation(s) from ${QUEUE_PATH}`)
+  } catch {
+    // nothing saved, or unreadable — start empty rather than fail to boot
+  }
+}
+
 function getRuntimeBaseDir(): string {
+  // Settings and the saved queue are shared by every server for this user, so
+  // tests need somewhere else to write or they clobber real state.
+  const override = process.env.HYZER_ANNOTATE_DIR
+  if (override) {
+    try {
+      mkdirSync(override, { recursive: true, mode: 0o700 })
+      return override
+    } catch {
+      // fall through to the defaults
+    }
+  }
+
   const uid = typeof process.getuid === "function" ? process.getuid() : null
   const candidates = [
     process.env.XDG_RUNTIME_DIR ? join(process.env.XDG_RUNTIME_DIR, APP_ID) : null,
@@ -101,6 +173,18 @@ function sanitizeFileStem(value: string): string {
   )
 }
 
+/**
+ * The image is already on disk by the time this returns, so the base64 copy in
+ * the payload is dead weight — hundreds of MB at the queue limit, and 33%
+ * larger than the PNG if it were persisted. Everything downstream reads the
+ * file path and the mode flags, never the data URL.
+ */
+function stripScreenshotData(annotation: any): any {
+  if (!annotation?.screenshot?.dataUrl) return annotation
+  const { dataUrl, ...screenshot } = annotation.screenshot
+  return { ...annotation, screenshot }
+}
+
 function saveScreenshot(annotation: any): string | null {
   const dataUrl = annotation?.screenshot?.dataUrl
   if (!dataUrl) return null
@@ -123,6 +207,39 @@ function describeScreenshot(entry: QueuedAnnotation): string {
   return shot.cropped === false
     ? `${entry.screenshotPath} (full viewport — the element had scrolled out of view)`
     : `${entry.screenshotPath} (cropped to the element)`
+}
+
+/**
+ * Deletes screenshots past SCREENSHOT_TTL_MS, skipping any the queue still
+ * references — with persistence on, a queued annotation can outlive the TTL and
+ * its image has to stay. Runs on startup and after each drain, which is often
+ * enough for a directory only this process writes to.
+ */
+function sweepScreenshots(): void {
+  const live = new Set(queue.map((entry) => entry.screenshotPath).filter(Boolean) as string[])
+  const cutoff = Date.now() - SCREENSHOT_TTL_MS
+  let removed = 0
+
+  let entries: string[]
+  try {
+    entries = readdirSync(ANNOTATION_DIR)
+  } catch {
+    return // nothing written yet
+  }
+
+  for (const name of entries) {
+    const filePath = join(ANNOTATION_DIR, name)
+    if (live.has(filePath)) continue
+    try {
+      if (statSync(filePath).mtimeMs >= cutoff) continue
+      rmSync(filePath, { force: true })
+      removed++
+    } catch {
+      // raced with something else, or not ours to delete
+    }
+  }
+
+  if (removed) logDebug(`swept ${removed} screenshot(s) older than ${SCREENSHOT_TTL_MS}ms`)
 }
 
 function formatAnnotation(entry: QueuedAnnotation, index: number): string {
@@ -206,6 +323,8 @@ function buildStatus(): Record<string, any> {
     claimTtlMs: CLAIM_TTL_MS,
     claims: listClaims(),
     queued: queue.length,
+    persistQueue,
+    queuePath: persistQueue ? QUEUE_PATH : null,
   }
 }
 
@@ -274,15 +393,31 @@ function handleRequest(port: number) {
         if (!body?.annotation || typeof body.annotation !== "object") throw new Error("annotation is required")
 
         rememberClaim(Number(body.tabId), body.sessionId, body?.extensionVersion)
+        const screenshotPath = saveScreenshot(body.annotation)
         queue.push({
           receivedAt: new Date().toISOString(),
           tabId: Number(body.tabId),
-          annotation: body.annotation,
-          screenshotPath: saveScreenshot(body.annotation),
+          annotation: stripScreenshotData(body.annotation),
+          screenshotPath,
         })
         while (queue.length > QUEUE_LIMIT) queue.shift()
+        saveQueue()
         logDebug(`annotation queued tab=${body.tabId} depth=${queue.length}`)
         json(res, 200, { ok: true, sessionId: body.sessionId, queued: queue.length }, origin)
+        return
+      }
+
+      if (req.method === "POST" && url.pathname === "/settings") {
+        const body = await readJsonBody(req)
+        if (typeof body?.persistQueue !== "boolean") throw new Error("persistQueue must be a boolean")
+        persistQueue = body.persistQueue
+        writeSettings()
+        // Turning it on captures what is already queued; turning it off takes
+        // the file away rather than leaving a stale copy behind.
+        if (persistQueue) saveQueue()
+        else discardSavedQueue()
+        logDebug(`persistQueue=${persistQueue}`)
+        json(res, 200, { ok: true, persistQueue, queued: queue.length }, origin)
         return
       }
 
@@ -340,6 +475,8 @@ mcp.registerTool(
   },
   async () => {
     const drained = queue.splice(0, queue.length)
+    if (drained.length) discardSavedQueue()
+    sweepScreenshots()
     if (!drained.length) {
       const hint =
         serverStatus === "listening"
@@ -359,6 +496,10 @@ mcp.registerTool(
     }
   }
 )
+
+readSettings()
+restoreQueue()
+sweepScreenshots()
 
 startHttpServer().catch((error) => {
   serverStatus = "failed"

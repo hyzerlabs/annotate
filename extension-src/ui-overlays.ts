@@ -12,15 +12,20 @@ export async function injectConnectionOverlay(tabId: number, claim?: TabClaim): 
     await chrome.scripting.executeScript({
       target: { tabId },
       world: "ISOLATED",
-      args: [claim?.sessionLabel || claim?.sessionId || "agent session", claim?.queued || 0, claim?.position || null],
-      func: (sessionLabel: string, queued: number, position: OpcPosition | null) => {
+      args: [
+        claim?.sessionLabel || claim?.sessionId || "agent session",
+        claim?.queued || 0,
+        claim?.persistQueue === true,
+        claim?.position || null,
+      ],
+      func: (sessionLabel: string, queued: number, persistQueue: boolean, position: OpcPosition | null) => {
         const shadow = globalThis.__opc_shadow
         const renderPill = globalThis.__opc_renderPill
         if (typeof shadow !== "function" || typeof renderPill !== "function") {
           throw new Error("Annotation UI helpers are unavailable")
         }
         const { host, root } = shadow("__opc_connection_overlay", "dock")
-        renderPill(root, host, sessionLabel, queued, position)
+        renderPill(root, host, sessionLabel, queued, persistQueue, position)
       },
     })
   } catch (error) {

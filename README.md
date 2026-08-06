@@ -79,9 +79,17 @@ Use the **×** in the pill to disconnect the tab. It also disconnects on its own
 
 Batching is on the receiving end: every annotation POSTs immediately, and the agent picks up the whole queue in one call. There's no "send" step to remember.
 
+## Keeping the queue across restarts
+
+The queue lives in memory, so restarting your agent normally discards anything you haven't asked it to read yet. **Keep queue across restarts** in the pill writes it to the runtime directory instead, and the setting itself is stored there too — a toggle that reset on restart would forget exactly when it mattered.
+
+It's off by default, applies to every project (it's a user preference, not a per-repo one), and the saved copy is discarded as soon as the agent drains the queue. Set `HYZER_ANNOTATE_DIR` to move the runtime directory; the tests use it to avoid touching your real settings.
+
 ## Screenshots
 
-Every annotation carries one. **Annotate** crops to the element you picked (plus a little padding for context); **Capture** stitches the whole scrollable page from viewport captures. Either way the image is written to a temp directory and passed to the agent as a file path, so it reads the image only when it needs to.
+Every annotation carries one, unless you clear the **Include screenshot** box in the composer. **Annotate** crops to the element you picked (plus a little padding for context); **Capture** stitches the whole scrollable page from viewport captures. Either way the image is written to a temp directory and passed to the agent as a file path, so it reads the image only when it needs to.
+
+Images are swept once they are more than six hours old — not when the queue drains, because the agent reads those paths *after* `get_annotations` returns. Anything still queued is never swept, however old.
 
 The pill hides itself during capture so it stays out of the shot. Two things worth knowing about full-page capture:
 

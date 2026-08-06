@@ -30,6 +30,8 @@ export type TabClaim = {
   queued?: number
   /** Where the user dragged the pill, so it stays put across navigation. */
   position?: OverlayPosition | null
+  /** Server-side setting, mirrored here so the pill renders it without a fetch. */
+  persistQueue?: boolean
 }
 
 export type OverlayPosition = { left: number; top: number }
@@ -100,10 +102,12 @@ export type ExtensionMessage =
   | { type: "disconnect_tab" }
   | { type: "refresh_sessions" }
   | { type: "overlay_moved"; position: OverlayPosition }
+  | { type: "set_persist_queue"; persistQueue: boolean }
 
 export type InstanceStatus = {
   app?: string
   queued?: number
+  persistQueue?: boolean
   [key: string]: unknown
 }
 

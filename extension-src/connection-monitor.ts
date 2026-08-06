@@ -10,6 +10,7 @@ type ConnectionMonitorOptions = {
   claimedTabs: ClaimsStore
   removeConnectionOverlay(tabId: number): Promise<void>
   setConnectionOverlayQueue(tabId: number, queued: number): Promise<void>
+  injectConnectionOverlay(tabId: number, claim: TabClaim): Promise<void>
   extensionVersion: string
 }
 
@@ -17,6 +18,7 @@ export function createConnectionMonitor({
   claimedTabs,
   removeConnectionOverlay,
   setConnectionOverlayQueue,
+  injectConnectionOverlay,
   extensionVersion,
 }: ConnectionMonitorOptions) {
   let timer: ReturnType<typeof setInterval> | null = null
@@ -68,6 +70,7 @@ export function createConnectionMonitor({
 
     const disconnected = new Set<string>()
     const queueDepths = new Map<string, number>()
+    const persistFlags = new Map<string, boolean>()
     for (const result of settled) {
       if (result.status !== "fulfilled") continue
       const { baseUrl, status } = result.value
@@ -76,6 +79,7 @@ export function createConnectionMonitor({
         continue
       }
       if (Number.isFinite(status.queued)) queueDepths.set(baseUrl, Number(status.queued))
+      if (typeof status.persistQueue === "boolean") persistFlags.set(baseUrl, status.persistQueue)
     }
 
     await Promise.allSettled(
@@ -91,6 +95,18 @@ export function createConnectionMonitor({
     await Promise.allSettled(
       Array.from(claimedTabs.entries()).map(async ([tabId, claim]) => {
         const queued = queueDepths.get(claim?.baseUrl)
+        const persistQueue = persistFlags.get(claim?.baseUrl)
+
+        // Persistence is a server-side setting another tab (or another agent
+        // session in the same project) can change, so it needs a full re-render
+        // rather than the cheap badge patch.
+        if (persistQueue !== undefined && persistQueue !== claim.persistQueue) {
+          const next = { ...claim, persistQueue, ...(queued === undefined ? {} : { queued }) }
+          claimedTabs.set(tabId, next)
+          await injectConnectionOverlay(tabId, next)
+          return
+        }
+
         if (queued === undefined || queued === claim.queued) return
         claimedTabs.set(tabId, { ...claim, queued })
         await setConnectionOverlayQueue(tabId, queued)

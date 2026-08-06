@@ -3,6 +3,14 @@
 import { spawn } from "node:child_process"
 import { existsSync, statSync } from "node:fs"
 import assert from "node:assert/strict"
+import { mkdtempSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+
+// Isolated runtime dir: settings.json and the saved queue are shared by every
+// server for this user, so without this the tests rewrite real state.
+const RUNTIME_DIR = mkdtempSync(join(tmpdir(), "hyzer-annotate-test-"))
+const ENV = { ...process.env, HYZER_ANNOTATE_DIR: RUNTIME_DIR }
 
 const PORT_START = 39280
 const PORT_END = 39300
@@ -12,7 +20,7 @@ const APP_ID = "hyzer-annotate"
 const PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
 
-const child = spawn(process.execPath, ["dist/server.js"], { stdio: ["pipe", "pipe", "pipe"] })
+const child = spawn(process.execPath, ["dist/server.js"], { stdio: ["pipe", "pipe", "pipe"], env: ENV })
 let stderr = ""
 child.stderr.on("data", (b) => (stderr += b))
 

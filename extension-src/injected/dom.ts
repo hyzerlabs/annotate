@@ -61,6 +61,7 @@ globalThis.__opc_renderPill = function renderPill(
   host: HTMLElement,
   sessionLabel: string,
   queued: number,
+  persistQueue: boolean,
   position?: OpcPosition | null
 ) {
   const h = globalThis.__opc_h!
@@ -100,6 +101,22 @@ globalThis.__opc_renderPill = function renderPill(
     h("span", { text: sessionLabel, attrs: { class: "session", title: sessionLabel } }),
   ])
 
+  const persistInput = h("input", { attrs: { type: "checkbox", "data-role": "persist-input" } }) as HTMLInputElement
+  persistInput.checked = persistQueue
+  persistInput.addEventListener("change", () => {
+    try {
+      chrome.runtime.sendMessage({ type: "set_persist_queue", persistQueue: persistInput.checked })
+    } catch {}
+  })
+
+  const persistToggle = h("label", {
+    attrs: {
+      class: "toggle",
+      "data-role": "persist",
+      title: "Queued annotations survive an agent restart, written under the runtime directory",
+    },
+  }, [persistInput, h("span", { text: "Keep queue across restarts" })])
+
   root.replaceChildren(
     h("div", { attrs: { class: "surface pill" } }, [
       h("div", { attrs: { class: "pill-row" } }, [
@@ -133,6 +150,7 @@ globalThis.__opc_renderPill = function renderPill(
         h("span", { attrs: { class: "spacer" } }),
         globalThis.__opc_queueBadge!(queued),
       ]),
+      h("div", { attrs: { class: "pill-row pill-row-persist" } }, [persistToggle]),
     ])
   )
 

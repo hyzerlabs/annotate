@@ -19,6 +19,7 @@ import type {
   AnnotationScreenshot,
   ExtensionMessage,
   SessionInfo,
+  TabClaim,
 } from "./types.js"
 
 const claimedTabs = createClaimsStore()
@@ -28,6 +29,7 @@ const monitor = createConnectionMonitor({
   claimedTabs,
   removeConnectionOverlay,
   setConnectionOverlayQueue,
+  injectConnectionOverlay,
   extensionVersion,
 })
 
@@ -38,6 +40,7 @@ const MESSAGE_TYPE = {
   DISCONNECT_TAB: "disconnect_tab",
   REFRESH_SESSIONS: "refresh_sessions",
   OVERLAY_MOVED: "overlay_moved",
+  SET_PERSIST_QUEUE: "set_persist_queue",
 } as const
 
 function isSupportedMessage(message: unknown): message is ExtensionMessage {
@@ -102,6 +105,16 @@ async function runMessageAction(message: ExtensionMessage, tab: chrome.tabs.Tab)
     return { ok: true }
   }
 
+  if (message.type === "set_persist_queue") {
+    const claim = claimedTabs.get(tab?.id)
+    if (!claim?.baseUrl) throw new Error("Tab is not connected to an annotation server")
+    await postJson(claim.baseUrl, "/settings", { persistQueue: message.persistQueue })
+    // The setting is per server, so every tab pointed at it re-renders.
+    await syncTabsOnServer(claim.baseUrl, { persistQueue: message.persistQueue })
+    logExtension("Queue persistence changed", { baseUrl: claim.baseUrl, persistQueue: message.persistQueue })
+    return { ok: true, persistQueue: message.persistQueue }
+  }
+
   if (message.type === "refresh_sessions") {
     const { sessions, context } = await requestSessionState()
     if (!tab.id) throw new Error("No active tab found")
@@ -131,6 +144,22 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
     if (tab?.id) await showAnnotationError(tab.id, text).catch(() => {})
     return { ok: false, error: text }
   }
+}
+
+/**
+ * Server-scoped state (queue depth, persistence) applies to every tab pointed
+ * at that server, not just the one that changed it. Re-injects rather than
+ * patching, because these change the pill's structure.
+ */
+async function syncTabsOnServer(baseUrl: string, patch: Partial<TabClaim>): Promise<void> {
+  await Promise.allSettled(
+    Array.from(claimedTabs.entries()).map(async ([tabId, claim]) => {
+      if (claim.baseUrl !== baseUrl) return
+      const next = { ...claim, ...patch }
+      claimedTabs.set(tabId, next)
+      await injectConnectionOverlay(tabId, next)
+    })
+  )
 }
 
 async function claimTabForSession(tab: chrome.tabs.Tab, session: SessionInfo): Promise<void> {

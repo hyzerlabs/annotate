@@ -29,6 +29,7 @@ declare global {
         host: HTMLElement,
         sessionLabel: string,
         queued: number,
+        persistQueue: boolean,
         position?: OpcPosition | null
       ) => void)
     | undefined
