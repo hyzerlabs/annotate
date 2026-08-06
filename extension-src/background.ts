@@ -4,14 +4,16 @@ import { postJson, requestSessionState } from "./server-api.js"
 import {
   injectConnectionOverlay,
   removeConnectionOverlay,
-  setConnectionOverlayHidden,
+  hideOverlayForCapture,
   setConnectionOverlayQueue,
+  showConnectionOverlay,
   showAnnotationError,
   showToast,
 } from "./ui-overlays.js"
 import { showSessionPicker } from "./session-picker.js"
 import { runAnnotationPicker } from "./annotation-picker.js"
 import { captureElement, captureFullPage } from "./capture.js"
+import { CAPTURE_ELEMENT_PADDING_PX } from "./constants.js"
 import { createConnectionMonitor } from "./connection-monitor.js"
 import { createClaimsStore } from "./claims-store.js"
 import type {
@@ -254,14 +256,14 @@ async function startAnnotationMode(
   const picked = await runAnnotationPicker(tab.id, mode)
   if (!picked || picked.cancelled === true) return { cancelled: true }
 
-  // The pill is hidden for the capture and deliberately stays hidden until the
-  // toast is ready, so it comes back WITH the confirmation rather than blinking
-  // back on its own first. Two separate reappearances read as a flash.
+  // Usually nothing is hidden at all, so there is nothing to put back. When the
+  // pill did have to go, it stays gone until the toast is ready, so it returns
+  // with the confirmation rather than blinking back on its own first.
   let pillHidden = false
   const restorePill = async () => {
     if (!pillHidden) return
     pillHidden = false
-    await setConnectionOverlayHidden(tab.id!, false)
+    await showConnectionOverlay(tab.id!)
   }
 
   let screenshot: AnnotationScreenshot | null = null
@@ -269,9 +271,19 @@ async function startAnnotationMode(
   try {
     if (picked.includeScreenshot) {
       logExtension("Capturing annotation screenshot", { tabId: tab.id, windowId: tab.windowId, mode })
-      // Our own pill would otherwise land in every shot.
-      pillHidden = true
-      await setConnectionOverlayHidden(tab.id, true)
+      // Only hide the pill if it would actually be in frame. An element crop
+      // rarely includes it, and hiding it anyway made it disappear and come
+      // back on every single send.
+      const captureRegion =
+        mode === "element" && picked.element
+          ? {
+              left: picked.element.rect.x - CAPTURE_ELEMENT_PADDING_PX,
+              top: picked.element.rect.y - CAPTURE_ELEMENT_PADDING_PX,
+              right: picked.element.rect.x + picked.element.rect.width + CAPTURE_ELEMENT_PADDING_PX,
+              bottom: picked.element.rect.y + picked.element.rect.height + CAPTURE_ELEMENT_PADDING_PX,
+            }
+          : null
+      pillHidden = await hideOverlayForCapture(tab.id, captureRegion)
       screenshot =
         mode === "page" || !picked.element
           ? await captureFullPage(tab)
@@ -281,6 +293,7 @@ async function startAnnotationMode(
         mode: screenshot.mode,
         cropped: screenshot.cropped,
         truncated: screenshot.truncated,
+        pillHidden,
         bytesApprox: Math.round((screenshot.dataUrl.length * 3) / 4),
       })
     } else {

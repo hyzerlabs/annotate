@@ -52,20 +52,56 @@ export async function setConnectionOverlayQueue(tabId: number, queued: number): 
   }
 }
 
-// Keeps our own chrome out of the screenshot. Resolves after two frames so the
-// hidden state has actually painted before captureVisibleTab reads the tab.
-export async function setConnectionOverlayHidden(tabId: number, hidden: boolean): Promise<void> {
+/**
+ * Hides the pill only if it would actually appear in what we are about to
+ * capture, and reports whether it did.
+ *
+ * `region` is the area being captured in viewport CSS pixels, or null for the
+ * whole page. Element crops usually do not include the pill at all, and hiding
+ * it regardless made it vanish and return on every send — a flash with nothing
+ * behind it. Resolves after two frames so the hidden state has painted before
+ * captureVisibleTab reads the tab.
+ */
+export async function hideOverlayForCapture(
+  tabId: number,
+  region: { left: number; top: number; right: number; bottom: number } | null
+): Promise<boolean> {
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "ISOLATED",
+      args: [region],
+      func: (area: { left: number; top: number; right: number; bottom: number } | null) => {
+        const overlay = document.getElementById("__opc_connection_overlay")
+        if (!overlay) return false
+
+        if (area) {
+          const rect = overlay.getBoundingClientRect()
+          const overlaps =
+            rect.left < area.right && rect.right > area.left && rect.top < area.bottom && rect.bottom > area.top
+          if (!overlaps) return false
+        }
+
+        overlay.style.visibility = "hidden"
+        return new Promise<boolean>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))
+        })
+      },
+    })
+    return injection?.result === true
+  } catch {
+    return false // tab closed or injection refused; nothing was hidden
+  }
+}
+
+export async function showConnectionOverlay(tabId: number): Promise<void> {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
       world: "ISOLATED",
-      args: [hidden],
-      func: (hide: boolean) => {
+      func: () => {
         const overlay = document.getElementById("__opc_connection_overlay")
-        if (overlay) overlay.style.visibility = hide ? "hidden" : ""
-        return new Promise<void>((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-        })
+        if (overlay) overlay.style.visibility = ""
       },
     })
   } catch {
