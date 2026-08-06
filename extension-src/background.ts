@@ -150,7 +150,7 @@ async function claimTabForSession(tab: chrome.tabs.Tab, session: SessionInfo): P
     baseUrl: session.baseUrl,
     origin: toOriginPattern(tab.url),
     extensionVersion,
-    queued: 0,
+    queued: Number.isFinite(session.queued) ? Number(session.queued) : 0,
   }
   claimedTabs.set(tab.id, claim)
 

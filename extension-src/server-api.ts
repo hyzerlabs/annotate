@@ -96,7 +96,12 @@ export async function requestSessionState(): Promise<SessionQueryResult> {
       if (!result.ok) continue
       const payload = result.payload
       const list = Array.isArray(payload?.sessions) ? payload.sessions : []
-      for (const item of list) sessions.push({ ...item, baseUrl: instance.baseUrl })
+      // Discovery already fetched /status, which carries the queue depth —
+      // carrying it through means a fresh claim shows the right count instead
+      // of starting at zero and waiting for the first monitor poll.
+      for (const item of list) {
+        sessions.push({ ...item, baseUrl: instance.baseUrl, queued: instance.status?.queued })
+      }
     } catch {
       // ignore dead instance
     }

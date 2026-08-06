@@ -123,7 +123,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
     renderPill(root, host, priorSession, priorQueued, priorPosition)
   }
 
-  const heading = items.length ? "Connect this tab to an agent session" : "No agent session available"
+  const heading = items.length ? "Connect this tab to a local agent session" : "No agent session available"
 
   root.replaceChildren(
     h("div", { attrs: { class: "surface panel" } }, [

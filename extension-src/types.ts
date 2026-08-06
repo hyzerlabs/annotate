@@ -4,6 +4,8 @@ export type SessionInfo = {
   directory?: string
   status?: string
   baseUrl: string
+  /** Queue depth reported by discovery, so a new claim seeds its badge correctly. */
+  queued?: number
 }
 
 export type SessionPickerReason = "plugin-not-found" | "no-sessions"

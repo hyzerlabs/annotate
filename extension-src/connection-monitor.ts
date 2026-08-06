@@ -41,6 +41,11 @@ export function createConnectionMonitor({
     timer = setInterval(() => {
       check().catch(() => {})
     }, CONNECTION_CHECK_INTERVAL_MS)
+    // Check straight away, not only after the first interval. MV3 stops the
+    // service worker when idle, so ensure() runs again on every wake — waiting
+    // out the interval each time left the queue badge stale for a full period
+    // exactly when the user had just come back to the tab.
+    check().catch(() => {})
   }
 
   async function check() {

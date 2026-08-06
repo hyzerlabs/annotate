@@ -13,7 +13,7 @@
 	--hz-space-near: 6px;
 	--hz-space-away: 12px;
 
-	--opc-surface: color-mix(in srgb, var(--hz-color-surface) 92%, transparent);
+	--opc-surface: color-mix(in srgb, var(--hz-color-surface-muted) 92%, transparent);
 	--opc-hairline: color-mix(in srgb, var(--hz-color-border) 28%, transparent);
 	--opc-hover: color-mix(in srgb, var(--hz-color-text) 8%, transparent);
 
@@ -54,7 +54,7 @@
 
 .surface {
 	background: var(--opc-surface);
-	border: 1px solid var(--opc-hairline);
+	border: var(--hz-border-width-thick) solid var(--opc-hairline);
 	box-shadow: var(--hz-shadow-md);
 	backdrop-filter: blur(12px) saturate(1.4);
 	-webkit-backdrop-filter: blur(12px) saturate(1.4);
@@ -86,7 +86,6 @@
 	width: min(400px, calc(100vw - 24px));
 	padding: var(--hz-space-away);
 	border-radius: var(--hz-radius-md);
-	box-shadow: var(--hz-shadow-lg);
 }
 
 /* ── controls ─────────────────────────────────────────────────────────── */
@@ -238,8 +237,8 @@ button:disabled {
 	height: 17px;
 	padding: 0 5px;
 	border-radius: var(--hz-radius-full);
-	background: color-mix(in srgb, var(--hz-intent-primary) 16%, transparent);
-	color: var(--hz-intent-primary);
+	background: color-mix(in srgb, var(--hz-intent-warning) 22%, transparent);
+	color: var(--hz-intent-warning);
 	font-weight: var(--hz-font-weight-semibold);
 	font-variant-numeric: tabular-nums;
 }
@@ -341,7 +340,9 @@ button:disabled {
 	margin-bottom: var(--hz-space-near);
 	padding: 4px 8px;
 	border-radius: var(--hz-radius-sm);
-	background: var(--hz-color-surface-muted);
+	/* plain surface, not surface-muted: the panel itself is muted now, so the
+	 * chip needs to step away from it rather than match it */
+	background: var(--hz-color-surface);
 	color: var(--hz-color-text-muted);
 	font-family: var(--hz-font-family-mono);
 	font-size: 0.75rem;
