@@ -3,7 +3,7 @@
   "name": "hyzer-annotate",
   "short_name": "hyzer-annotate",
   "description": "Annotate any page and send the element, screenshot, and your comment to your local coding agent",
-  "homepage_url": "https://github.com/hyzerlabs/hyzer-annotate",
+  "homepage_url": "https://github.com/hyzerlabs/annotate",
   "permissions": [
     "tabs",
     "activeTab",
