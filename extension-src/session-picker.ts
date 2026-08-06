@@ -104,7 +104,6 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
   const priorQueued = Number(root.querySelector("[data-role='queue-count']")?.textContent) || 0
   const priorPersist = (root.querySelector("[data-role='persist-input']") as HTMLInputElement | null)?.checked === true
   const drag = makeDraggable(host, {
-    blockDragSelector: "button",
     onDrop: (dropped) => {
       try {
         chrome.runtime.sendMessage({ type: "overlay_moved", position: dropped })

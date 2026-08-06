@@ -156,7 +156,6 @@ globalThis.__opc_renderPill = function renderPill(
 
   // Reported on drop so the position survives navigation and re-injection.
   makeDraggable(host, {
-    blockDragSelector: "button",
     onDrop: (dropped) => {
       try {
         chrome.runtime.sendMessage({ type: "overlay_moved", position: dropped })
@@ -187,6 +186,12 @@ globalThis.__opc_setQueueBadge = function setQueueBadge(badge: HTMLElement, queu
 
 const DRAG_MARGIN = 8
 
+// Every interactive control, not just buttons. A pointerdown that starts a drag
+// calls preventDefault and captures the pointer, which swallows the activation
+// that a checkbox or a label needs — so anything clickable has to opt out of
+// dragging or it silently stops working.
+const DRAG_BLOCKED_CONTROLS = "button, input, label, textarea, select, a"
+
 /**
  * Anchors `floating` to `trigger`, flipping above when there is no room below.
  * `floating` must already be displayed — an undisplayed element measures 0 tall
@@ -212,9 +217,18 @@ globalThis.__opc_anchorTo = function anchorTo(trigger: Element, floating: HTMLEl
  */
 globalThis.__opc_makeDraggable = function makeDraggable(overlay: HTMLElement, options = {}) {
   if (!overlay) throw new Error("overlay is required")
-  if (overlay.__opcDragApi) return overlay.__opcDragApi
+  // Options are captured in the closure below, so a cached API keeps whichever
+  // ones it was first built with. The pill and the session picker share a host,
+  // so differing options between them would resolve to "whoever rendered first"
+  // — a bug that only shows up in one order. Refuse the ambiguity instead.
+  if (overlay.__opcDragApi) {
+    if (options.blockDragSelector && options.blockDragSelector !== overlay.__opcDragBlocked) {
+      throw new Error("makeDraggable: this element already has different blockDragSelector options")
+    }
+    return overlay.__opcDragApi
+  }
 
-  const blockDragSelector = options.blockDragSelector || "button"
+  const blockDragSelector = options.blockDragSelector || DRAG_BLOCKED_CONTROLS
   const onDrop = options.onDrop
 
   let dragging = false
@@ -306,6 +320,7 @@ globalThis.__opc_makeDraggable = function makeDraggable(overlay: HTMLElement, op
     applyPosition(getPosition())
   })
 
+  overlay.__opcDragBlocked = blockDragSelector
   overlay.__opcDragApi = { applyPosition, getPosition }
   return overlay.__opcDragApi
 }

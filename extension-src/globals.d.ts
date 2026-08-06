@@ -42,6 +42,7 @@ declare global {
 
   interface HTMLElement {
     __opcDragApi?: OpcDragApi
+    __opcDragBlocked?: string
   }
 }
 

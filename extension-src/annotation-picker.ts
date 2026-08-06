@@ -138,9 +138,9 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
 
     root.replaceChildren(box, panel)
 
-    // Everything interactive blocks the drag, so text selection in the comment
-    // box still works and buttons stay clickable.
-    const drag = makeDraggable(panel, { blockDragSelector: "button, textarea, input, label" })
+    // The default blocked-controls list covers the textarea and buttons, so text
+    // selection in the comment box works and the controls stay clickable.
+    const drag = makeDraggable(panel)
 
     return { host, root, box, panel, targetInfo, textarea, cancelButton, submitButton, screenshotToggle, drag }
   }
