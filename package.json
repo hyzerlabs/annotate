@@ -32,6 +32,9 @@
     "localhost"
   ],
   "license": "GPL-3.0-only",
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hyzerlabs/annotate.git"
