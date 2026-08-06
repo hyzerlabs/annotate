@@ -453,23 +453,28 @@ textarea:focus-visible {
 
 /* ── error toast ──────────────────────────────────────────────────────── */
 
+/* Anchored next to the pill when there is one (see showToast), so it lands
+ * where the composer just was rather than in a far corner you weren't looking
+ * at. right/bottom are the fallback for when the pill is gone. */
 .toast {
 	position: fixed;
 	right: var(--hz-space-away);
 	bottom: var(--hz-space-away);
+	min-width: 210px;
 	max-width: 360px;
 	padding: 10px 14px;
 	border-radius: var(--hz-radius-md);
 	border-left: 3px solid var(--hz-intent-danger);
-	min-width: 200px;
-	transform: translateX(calc(100% + 40px));
+	/* A short rise rather than a slide in from off-screen right: the anchored
+	 * position is nowhere near that edge, so the slide read as a flash. */
+	transform: translateY(6px);
 	opacity: 0;
 	transition: transform var(--hz-duration-fast) var(--hz-ease-standard),
 		opacity var(--hz-duration-fast) var(--hz-ease-standard);
 }
 
 .toast[data-shown] {
-	transform: translateX(0);
+	transform: translateY(0);
 	opacity: 1;
 }
 

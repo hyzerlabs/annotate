@@ -192,6 +192,7 @@ async function claimTabForSession(tab: chrome.tabs.Tab, session: SessionInfo): P
     origin: toOriginPattern(tab.url),
     extensionVersion,
     queued: Number.isFinite(session.queued) ? Number(session.queued) : 0,
+    persistQueue: session.persistQueue === true,
   }
   claimedTabs.set(tab.id, claim)
 
@@ -325,7 +326,7 @@ async function startAnnotationMode(
     title: mode === "page" ? "Page comment sent" : "Annotation sent",
     body: Number.isFinite(queued) ? `${queued} waiting for the agent` : undefined,
     intent: "success",
-    durationMs: 2500,
+    durationMs: 3400,
   }).catch(() => {})
 
   if (Number.isFinite(queued)) {

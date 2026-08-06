@@ -117,7 +117,24 @@ export async function showToast(tabId: number, options: ToastOptions): Promise<v
       ])
       root.replaceChildren(toast)
 
-      requestAnimationFrame(() => toast.setAttribute("data-shown", ""))
+      // Land next to the pill, where the composer just was.
+      const pill = document.getElementById("__opc_connection_overlay")
+      const anchorTo = globalThis.__opc_anchorTo
+      if (pill?.isConnected && typeof anchorTo === "function") {
+        const { left, top } = anchorTo(pill, toast)
+        toast.style.right = "auto"
+        toast.style.bottom = "auto"
+        toast.style.left = `${Math.round(left)}px`
+        toast.style.top = `${Math.round(top)}px`
+      }
+
+      // Forcing a style flush is what makes the transition run. A single
+      // requestAnimationFrame can fire before the initial style is computed, so
+      // the element jumps straight to the shown state — which read as a flash
+      // rather than an appearance.
+      void toast.offsetWidth
+      toast.setAttribute("data-shown", "")
+
       setTimeout(() => {
         toast.removeAttribute("data-shown")
         setTimeout(() => host.remove(), 300)

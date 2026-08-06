@@ -100,7 +100,7 @@ export function createConnectionMonitor({
         // Persistence is a server-side setting another tab (or another agent
         // session in the same project) can change, so it needs a full re-render
         // rather than the cheap badge patch.
-        if (persistQueue !== undefined && persistQueue !== claim.persistQueue) {
+        if (persistQueue !== undefined && persistQueue !== (claim.persistQueue === true)) {
           const next = { ...claim, persistQueue, ...(queued === undefined ? {} : { queued }) }
           claimedTabs.set(tabId, next)
           await injectConnectionOverlay(tabId, next)

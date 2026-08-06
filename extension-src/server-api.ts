@@ -100,7 +100,12 @@ export async function requestSessionState(): Promise<SessionQueryResult> {
       // carrying it through means a fresh claim shows the right count instead
       // of starting at zero and waiting for the first monitor poll.
       for (const item of list) {
-        sessions.push({ ...item, baseUrl: instance.baseUrl, queued: instance.status?.queued })
+        sessions.push({
+          ...item,
+          baseUrl: instance.baseUrl,
+          queued: instance.status?.queued,
+          persistQueue: instance.status?.persistQueue,
+        })
       }
     } catch {
       // ignore dead instance

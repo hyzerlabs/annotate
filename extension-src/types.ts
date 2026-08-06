@@ -6,6 +6,8 @@ export type SessionInfo = {
   baseUrl: string
   /** Queue depth reported by discovery, so a new claim seeds its badge correctly. */
   queued?: number
+  /** Same, for the persistence toggle — an unseeded claim forces a needless re-render. */
+  persistQueue?: boolean
 }
 
 export type SessionPickerReason = "plugin-not-found" | "no-sessions"
