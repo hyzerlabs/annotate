@@ -195,7 +195,9 @@ globalThis.__opc_queueBadge = function queueBadge(queued: number) {
 globalThis.__opc_setQueueBadge = function setQueueBadge(badge: HTMLElement, queued: number) {
   const count = badge.querySelector("[data-role='queue-count']")
   if (count) count.textContent = String(queued)
-  badge.toggleAttribute("hidden", queued < 1)
+  // Stays in the layout at zero; only the colour changes. Removing it resized
+  // the pill on every transition through zero.
+  badge.toggleAttribute("data-empty", queued < 1)
 }
 
 const DRAG_MARGIN = 8

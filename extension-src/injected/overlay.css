@@ -219,8 +219,10 @@ button:disabled {
 	max-width: 22ch;
 }
 
-/* Queue depth. Hidden at zero rather than showing "0 queued", which reads as
- * a broken counter. */
+/* Always present, including at zero: hiding it resized the pill every time the
+ * count crossed 0, which meant a re-layout mid-animation. Zero is drawn in the
+ * neutral colour instead, so it reads as "nothing waiting" rather than as an
+ * alert about nothing. */
 .queue {
 	display: inline-flex;
 	align-items: center;
@@ -231,8 +233,9 @@ button:disabled {
 	white-space: nowrap;
 }
 
-.queue[hidden] {
-	display: none;
+.queue[data-empty] .queue-count {
+	background: color-mix(in srgb, var(--hz-color-text) 8%, transparent);
+	color: var(--hz-color-text-muted);
 }
 
 .queue-count {
