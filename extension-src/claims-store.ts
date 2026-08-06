@@ -2,7 +2,7 @@ import type { ClaimsStore, TabClaim } from "./types.js"
 
 export function createClaimsStore(): ClaimsStore {
   const claims = new Map<number, TabClaim>()
-  const storageKey = "opencodeChromeAnnotationClaims"
+  const storageKey = "hyzerAnnotateClaims"
 
   function storage(): chrome.storage.StorageArea | undefined {
     return chrome.storage?.session || chrome.storage?.local

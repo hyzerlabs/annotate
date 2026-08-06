@@ -1,0 +1,34 @@
+hyzer-annotate
+Copyright (C) 2026 Hyzer Labs
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License version 3 as published by the Free
+Software Foundation. See LICENSE for the full text.
+
+--------------------------------------------------------------------------------
+
+This work is a modified derivative of:
+
+    opencode-chrome-annotation
+    Copyright (C) Benjamin Shafii
+    https://github.com/JodusNodus/opencode-chrome-annotation
+    Licensed GPL-3.0-only
+    Vendored at commit 01f01812e8e8de25a1556e733ac2a1800ffc4483 (2026-04-30)
+
+Modifications by Hyzer Labs, beginning 2026-08-06:
+
+  - Replaced the OpenCode plugin (src/plugin.ts) with an MCP server
+    (src/server.ts). Annotations are queued in memory and pulled by the agent
+    through a `get_annotations` tool, rather than pushed into an OpenCode
+    session via its plugin client.
+  - Removed OpenCode session enumeration and title tracking. One server process
+    now maps to exactly one agent session.
+  - Changed the discovery app id to "hyzer-annotate" and the port range to
+    39280-39300, so this extension and the upstream one do not find each
+    other's servers.
+  - Rewrote user-facing strings in extension-src/ to be agent-neutral.
+  - Replaced bun with esbuild in the build scripts.
+  - Added test/smoke.mjs.
+
+The unmodified upstream source is preserved as the first commit in this
+repository's history for comparison.

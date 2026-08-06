@@ -4,7 +4,7 @@ import type { AnnotationElement, AnnotationPickerResult, AnnotationViewport } fr
 function annotationPickerScript(): Promise<AnnotationPickerResult> {
   const h = globalThis.__opc_h!
   if (typeof h !== "function") {
-    throw new Error("OpenCode UI helper is unavailable")
+    throw new Error("Annotation UI helper is unavailable")
   }
 
   const STYLE = {
@@ -103,7 +103,7 @@ function annotationPickerScript(): Promise<AnnotationPickerResult> {
     const box = h("div", { style: STYLE.box })
     const targetInfo = h("div", { style: STYLE.targetInfo })
     const textarea = h("textarea", { style: STYLE.textarea }) as HTMLTextAreaElement
-    textarea.placeholder = "What should OpenCode change here?"
+    textarea.placeholder = "What should the agent change here?"
 
     const cancelButton = h("button", {
       text: "Cancel",

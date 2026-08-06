@@ -14,7 +14,7 @@ export async function injectConnectionOverlay(tabId: number): Promise<void> {
       func: () => {
         const makeDockable = globalThis.__opc_makeDockable
         if (typeof makeDockable !== "function") {
-          throw new Error("OpenCode dock helper is unavailable")
+          throw new Error("Annotation dock helper is unavailable")
         }
 
         function createCloseIcon() {
@@ -142,7 +142,7 @@ export async function showAnnotationError(tabId: number, message: string): Promi
 
       const panel = document.createElement("div")
       panel.id = "__opc_annotation_error"
-      panel.textContent = `OpenCode annotation failed: ${errorMessage}`
+      panel.textContent = `Annotation failed: ${errorMessage}`
       panel.style.cssText = [
         "position:fixed",
         "right:16px",

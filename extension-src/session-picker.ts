@@ -4,7 +4,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
   const h = globalThis.__opc_h!
   const makeDockable = globalThis.__opc_makeDockable!
   if (typeof h !== "function" || typeof makeDockable !== "function") {
-    throw new Error("OpenCode UI helpers are unavailable")
+    throw new Error("Annotation UI helpers are unavailable")
   }
 
   if (typeof globalThis.__opc_cleanupSessionPicker === "function") {
@@ -154,23 +154,23 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
   function emptyStateContent() {
     if (context.reason === "no-sessions") {
       return {
-        title: "No OpenCode session available",
-        text: "The local plugin responded, but it did not report an active OpenCode session for this project.",
+        title: "No agent session available",
+        text: "The annotation server responded but did not report an active session for this project.",
         steps: [
-          "Open OpenCode in the project you want to edit",
-          "Make sure the annotation plugin is enabled in that OpenCode config",
-          "Restart OpenCode if you just changed the config",
+          "Start your coding agent in the project you want to edit",
+          "Check that hyzer-annotate is configured as an MCP server there",
+          "Restart the agent if you just changed its config",
         ],
       }
     }
 
     return {
-      title: "OpenCode plugin not found",
-      text: "The extension could not find a local OpenCode annotation server on ports 39240-39260.",
+      title: "Annotation server not found",
+      text: "The extension could not find a local annotation server on ports 39280-39300.",
       steps: [
-        "Install npm package: opencode-chrome-annotation",
-        "Add it to your OpenCode config",
-        "Restart OpenCode in your project",
+        "Add hyzer-annotate to your agent's MCP config",
+        "Start your coding agent in the project you want to edit",
+        "Restart the agent if you just changed its config",
       ],
     }
   }
@@ -233,7 +233,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
 
   overlay.appendChild(
     h("div", { style: STYLE.header }, [
-      h("div", { text: "Connect this tab to OpenCode", style: STYLE.title }),
+      h("div", { text: "Connect this tab to an agent session", style: STYLE.title }),
       h("button", {
         style: STYLE.close,
         attrs: { type: "button", "aria-label": "Close session picker" },

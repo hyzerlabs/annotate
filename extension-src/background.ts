@@ -97,7 +97,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error)
     if (message.type === "connect_tab_to_session") {
-      warnExtension("Failed to connect tab to OpenCode session", {
+      warnExtension("Failed to connect tab to agent session", {
         tabId: tab?.id,
         sessionId: message.session?.id,
         error: text,
@@ -110,7 +110,7 @@ async function handleMessage(message: ExtensionMessage, sender: chrome.runtime.M
 
 async function claimTabForSession(tab: chrome.tabs.Tab, session: SessionInfo): Promise<void> {
   if (!tab.id) throw new Error("No active tab found")
-  logExtension("Connecting tab to OpenCode session", {
+  logExtension("Connecting tab to agent session", {
     tabId: tab?.id,
     sessionId: session?.id,
     sessionLabel: sessionLabel(session),
@@ -130,7 +130,7 @@ async function claimTabForSession(tab: chrome.tabs.Tab, session: SessionInfo): P
   await injectConnectionOverlay(tab.id)
   monitor.ensure()
 
-  logExtension("Connected tab to OpenCode session", {
+  logExtension("Connected tab to agent session", {
     tabId: tab?.id,
     sessionId: session?.id,
     sessionLabel: sessionLabel(session),
@@ -159,7 +159,7 @@ async function disconnectTab(tab: chrome.tabs.Tab): Promise<boolean> {
   await removeConnectionOverlay(tab.id)
   if (!claimedTabs.size()) monitor.stop()
 
-  logExtension("Disconnected tab from OpenCode session", {
+  logExtension("Disconnected tab from agent session", {
     tabId: tab?.id,
     sessionId: claim?.sessionId,
   })
@@ -210,7 +210,7 @@ async function startAnnotationMode(tabOverride?: chrome.tabs.Tab): Promise<{ can
 
   const claim = claimedTabs.get(tab.id)
   if (!claim?.baseUrl || !claim?.sessionId) {
-    throw new Error("Tab is not connected to an OpenCode instance")
+    throw new Error("Tab is not connected to an annotation server")
   }
 
   const annotationResponse = await postJson(claim.baseUrl, "/annotation", {
@@ -218,8 +218,8 @@ async function startAnnotationMode(tabOverride?: chrome.tabs.Tab): Promise<{ can
     annotation: annotationPayload,
   })
 
-  logExtension("Annotation delivered to OpenCode instance", { tabId: tab.id, baseUrl: claim.baseUrl })
-  logExtension("Annotation accepted by OpenCode plugin", {
+  logExtension("Annotation delivered to annotation server", { tabId: tab.id, baseUrl: claim.baseUrl })
+  logExtension("Annotation accepted by annotation server", {
     tabId: tab.id,
     sessionId: annotationResponse?.sessionId,
   })
@@ -290,7 +290,7 @@ chrome.action.onClicked.addListener(async (clickedTab) => {
     await ensureSiteAccess(tab)
     const { sessions, context } = await requestSessionState()
     await showSessionPicker(tab.id, sessions, context)
-    logExtension(sessions.length ? "Session picker shown" : "OpenCode setup help shown", undefined)
+    logExtension(sessions.length ? "Session picker shown" : "Setup help shown", undefined)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     warnExtension("Failed to show session picker", { error: message })

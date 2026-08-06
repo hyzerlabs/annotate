@@ -1,572 +1,352 @@
-import type { Plugin } from "@opencode-ai/plugin";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "fs";
-import { tmpdir } from "os";
-import { basename, dirname, join } from "path";
-import { createServer, type Server } from "http";
-import { fileURLToPath } from "url";
+// hyzer-annotate — local annotation server + MCP bridge.
+//
+// Derived from opencode-chrome-annotation (GPL-3.0-only) by Benjamin Shafii.
+// The HTTP contract and claim handling follow the original; the OpenCode
+// plugin push path is replaced by an MCP tool the agent pulls from.
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-const PACKAGE_JSON_PATH = join(__dirname, "..", "package.json");
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js"
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { basename, dirname, join } from "node:path"
+import { createServer, type Server } from "node:http"
+import { fileURLToPath } from "node:url"
 
-const BASE_DIR = getRuntimeBaseDir();
-const LOG_PATH = join(BASE_DIR, "plugin.log");
-const ANNOTATION_DIR = join(BASE_DIR, "annotations");
-const PORT_START = 39240;
-const PORT_END = 39260;
-const LISTEN_HOST = "127.0.0.1";
-const APP_ID = "opencode-chrome-annotation";
-const INSTANCE_SESSION_PREFIX = "plugin:";
-const CLAIM_TTL_MS = 5 * 60 * 1000;
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const PACKAGE_JSON_PATH = join(__dirname, "..", "package.json")
 
-let cachedVersion: string | null = null;
-let processSessionId = `${INSTANCE_SESSION_PREFIX}${Math.random().toString(36).slice(2)}`;
-let pluginClient: any = null;
-let pluginDirectory = process.cwd();
-let pluginSessionLabel = buildSessionLabel(pluginDirectory);
-let listeningPort: number | null = null;
-let httpServer: Server | null = null;
-let serverStartupStatus: "not-started" | "starting" | "listening" | "failed" = "not-started";
-let serverStartupError: string | null = null;
-const bindFailures: Array<{ port: number; code?: string; message: string }> = [];
-let lastAnnotationStatus: Record<string, any> | null = null;
-let activeOpencodeSessionId: string | null = null;
-let lastExtensionVersion: string | null = null;
-const sessionTitles = new Map<string, string>();
-const claims = new Map<number, { sessionId: string; claimedAt: string; lastSeenAt: string; extensionVersion?: string }>();
+const APP_ID = "hyzer-annotate"
+const PORT_START = 39280
+const PORT_END = 39300
+const LISTEN_HOST = "127.0.0.1"
+const CLAIM_TTL_MS = 5 * 60 * 1000
+// ponytail: annotations live in memory only — a queue drained by the agent.
+// If you ever want them to survive an agent restart, persist to ANNOTATION_DIR.
+const QUEUE_LIMIT = 200
 
-function fallbackSession(): { id: string; title: string; directory: string; status: string } {
-  return {
-    id: processSessionId,
-    title: pluginSessionLabel,
-    directory: pluginDirectory,
-    status: "open",
-  };
+const BASE_DIR = getRuntimeBaseDir()
+const LOG_PATH = join(BASE_DIR, "server.log")
+const ANNOTATION_DIR = join(BASE_DIR, "annotations")
+
+const sessionId = `${APP_ID}:${process.pid}`
+const directory = process.cwd()
+const sessionLabel = `${basename(directory) || "project"}`
+
+let listeningPort: number | null = null
+let httpServer: Server | null = null
+let serverStatus: "starting" | "listening" | "failed" = "starting"
+let serverError: string | null = null
+let lastExtensionVersion: string | null = null
+
+type QueuedAnnotation = {
+  receivedAt: string
+  tabId: number
+  annotation: any
+  screenshotPath: string | null
 }
 
-function getRuntimeBaseDir(): string {
-  const uid = typeof process.getuid === "function" ? process.getuid() : null;
-  const candidates = [
-    process.env.XDG_RUNTIME_DIR ? join(process.env.XDG_RUNTIME_DIR, "opencode-chrome-annotation") : null,
-    join(tmpdir(), `opencode-chrome-annotation-${uid ?? "user"}`),
-  ];
+const queue: QueuedAnnotation[] = []
+const claims = new Map<number, { sessionId: string; claimedAt: string; lastSeenAt: string; extensionVersion?: string }>()
 
+function getRuntimeBaseDir(): string {
+  const uid = typeof process.getuid === "function" ? process.getuid() : null
+  const candidates = [
+    process.env.XDG_RUNTIME_DIR ? join(process.env.XDG_RUNTIME_DIR, APP_ID) : null,
+    join(tmpdir(), `${APP_ID}-${uid ?? "user"}`),
+  ]
   for (const candidate of candidates) {
-    if (!candidate) continue;
+    if (!candidate) continue
     try {
-      mkdirSync(candidate, { recursive: true, mode: 0o700 });
-      return candidate;
+      mkdirSync(candidate, { recursive: true, mode: 0o700 })
+      return candidate
     } catch {
-      // Try the next location.
+      // try the next location
     }
   }
+  return join(tmpdir(), `${APP_ID}-${uid ?? "user"}`)
+}
 
-  return join(tmpdir(), `opencode-chrome-annotation-${uid ?? "user"}`);
+// stdout is the MCP transport — never log there.
+function logDebug(message: string): void {
+  try {
+    appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${message}\n`, "utf8")
+  } catch {
+    // ignore
+  }
 }
 
 function getPackageVersion(): string {
-  if (cachedVersion) return cachedVersion;
   try {
-    const pkg = JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf8"));
-    if (typeof pkg?.version === "string") {
-      cachedVersion = pkg.version;
-      return pkg.version;
-    }
+    const pkg = JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf8"))
+    if (typeof pkg?.version === "string") return pkg.version
   } catch {
     // ignore
   }
-  cachedVersion = "unknown";
-  return cachedVersion;
-}
-
-function logDebug(message: string): void {
-  try {
-    appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${message}\n`, "utf8");
-  } catch {
-    // ignore
-  }
-}
-
-function buildSessionLabel(directory: string): string {
-  const name = basename(directory || process.cwd());
-  return name ? `OpenCode: ${name}` : "OpenCode";
+  return "unknown"
 }
 
 function decodeDataUrl(dataUrl: string): { mime: string; bytes: Buffer } {
-  const match = String(dataUrl).match(/^data:([^;,]+)?;base64,(.+)$/);
-  if (!match) throw new Error("Annotation screenshot must be a base64 data URL");
-  return {
-    mime: match[1] || "application/octet-stream",
-    bytes: Buffer.from(match[2], "base64"),
-  };
+  const match = String(dataUrl).match(/^data:([^;,]+)?;base64,(.+)$/)
+  if (!match) throw new Error("Annotation screenshot must be a base64 data URL")
+  return { mime: match[1] || "application/octet-stream", bytes: Buffer.from(match[2], "base64") }
 }
 
 function sanitizeFileStem(value: string): string {
-  return String(value || "annotation")
-    .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 80) || "annotation";
+  return (
+    String(value || "annotation")
+      .toLowerCase()
+      .replace(/[^a-z0-9._-]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80) || "annotation"
+  )
 }
 
-function buildAnnotationPrompt(annotation: any): string {
-  const comment = typeof annotation?.comment === "string" ? annotation.comment.trim() : "";
-  const page = annotation?.page || {};
-  const element = annotation?.element || {};
-  const rect = element?.rect || {};
-  const viewport = annotation?.viewport || {};
+function saveScreenshot(annotation: any): string | null {
+  const dataUrl = annotation?.screenshot?.dataUrl
+  if (!dataUrl) return null
+  mkdirSync(ANNOTATION_DIR, { recursive: true })
+  const { mime, bytes } = decodeDataUrl(dataUrl)
+  const ext = mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : "png"
+  const stem = sanitizeFileStem(annotation?.page?.title || annotation?.element?.tag || "annotation")
+  const filePath = join(ANNOTATION_DIR, `${Date.now()}-${stem}.${ext}`)
+  writeFileSync(filePath, bytes)
+  return filePath
+}
 
-  return [
-    "Browser annotation from Chrome",
+function formatAnnotation(entry: QueuedAnnotation, index: number): string {
+  const { annotation } = entry
+  const page = annotation?.page || {}
+  const element = annotation?.element || {}
+  const rect = element?.rect || {}
+  const comment = typeof annotation?.comment === "string" ? annotation.comment.trim() : ""
+
+  const lines = [
+    `## Annotation ${index + 1} (${entry.receivedAt})`,
     "",
-    "User comment:",
     comment || "(no comment provided)",
     "",
-    "Page:",
-    `Title: ${page.title || ""}`,
-    `URL: ${page.url || ""}`,
-    typeof annotation?.tabId === "number" ? `Tab ID: ${annotation.tabId}` : "Tab ID: ",
-    `Viewport: width=${viewport.width ?? ""} height=${viewport.height ?? ""} devicePixelRatio=${viewport.devicePixelRatio ?? ""}`,
-    "",
-    "Selected element:",
-    `Selector: ${element.selector || ""}`,
-    `Tag: ${element.tag || ""}`,
-    `Role: ${element.role || ""}`,
-    `Text: ${element.text || ""}`,
-    `Aria label: ${element.ariaLabel || ""}`,
-    `Rect: x=${rect.x ?? ""} y=${rect.y ?? ""} width=${rect.width ?? ""} height=${rect.height ?? ""}`,
-    "",
-    "Please inspect the screenshot and selected element metadata, then make the appropriate code change.",
-  ].join("\n");
-}
-
-function isExplicitFalse(value: any): boolean {
-  return value === false || value?.data === false;
-}
-
-function unwrapClientResult(result: any, action: string): any {
-  if (!result || typeof result !== "object") return result;
-
-  if ("error" in result && result.error) {
-    const err = result.error;
-    const message =
-      (typeof err?.message === "string" && err.message) ||
-      (typeof err?.error === "string" && err.error) ||
-      (typeof err === "string" && err) ||
-      `OpenCode ${action} failed`;
-    throw new Error(message);
-  }
-
-  if ("data" in result) return result.data;
-  return result;
-}
-
-function setLastAnnotationStatus(status: Record<string, any>): void {
-  lastAnnotationStatus = { ...status, time: new Date().toISOString() };
-}
-
-function applySessionTitle(sessionId: string, title: string): void {
-  const next = String(title || "").trim();
-  if (!sessionId || !next) return;
-  sessionTitles.set(sessionId, next);
-  if (activeOpencodeSessionId === sessionId) {
-    pluginSessionLabel = next;
-  }
-}
-
-function parseSessionTitle(response: any): { id: string; title: string } | null {
-  const info = response?.data || response;
-  if (!info || typeof info !== "object") return null;
-  if (typeof info.id !== "string" || typeof info.title !== "string") return null;
-  return { id: info.id, title: info.title };
-}
-
-function rememberClaim(tabId: number, sessionId: string, extensionVersion?: string): void {
-  const key = Number(tabId);
-  const now = new Date().toISOString();
-  const prior = claims.get(key);
-  const cleanVersion = cleanExtensionVersion(extensionVersion);
-  if (cleanVersion) lastExtensionVersion = cleanVersion;
-  claims.set(key, {
-    sessionId,
-    claimedAt: prior?.claimedAt || now,
-    lastSeenAt: now,
-    extensionVersion: cleanVersion || prior?.extensionVersion,
-  });
+    `- Page: ${page.title || "(untitled)"} — ${page.url || ""}`,
+    `- Element: <${element.tag || "?"}>${element.role ? ` role=${element.role}` : ""}${element.id ? ` id=${element.id}` : ""}`,
+    `- Selector: ${element.selector || ""}`,
+  ]
+  if (element.className) lines.push(`- Class: ${element.className}`)
+  if (element.ariaLabel) lines.push(`- Aria label: ${element.ariaLabel}`)
+  if (element.text) lines.push(`- Text: ${String(element.text).slice(0, 300)}`)
+  lines.push(`- Rect: x=${rect.x ?? "?"} y=${rect.y ?? "?"} w=${rect.width ?? "?"} h=${rect.height ?? "?"}`)
+  if (entry.screenshotPath) lines.push(`- Screenshot: ${entry.screenshotPath}`)
+  return lines.join("\n")
 }
 
 function cleanExtensionVersion(value: any): string | undefined {
-  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined
 }
 
-function pruneStaleClaims(): void {
-  const cutoff = Date.now() - CLAIM_TTL_MS;
-  for (const [tabId, claim] of claims.entries()) {
-    const lastSeen = Date.parse(claim.lastSeenAt);
-    if (!Number.isFinite(lastSeen) || lastSeen < cutoff) {
-      claims.delete(tabId);
-    }
-  }
-}
-
-async function ensureSessionTitle(sessionId: string): Promise<void> {
-  if (!sessionId || sessionTitles.has(sessionId) || !pluginClient?.session?.get) return;
-  try {
-    const response = await pluginClient.session.get({
-      path: { id: sessionId },
-      query: { directory: pluginDirectory },
-    });
-    const parsed = parseSessionTitle(response);
-    if (parsed) applySessionTitle(parsed.id, parsed.title);
-  } catch {
-    // ignore
-  }
-}
-
-async function listOpenCodeSessions(): Promise<Array<{ id: string; title: string; directory?: string; status: string }>> {
-  if (!pluginClient?.session?.list) {
-    return [fallbackSession()];
-  }
-
-  try {
-    const response = await pluginClient.session.list({ query: { directory: pluginDirectory } });
-    const rows = Array.isArray(response?.data) ? response.data : Array.isArray(response) ? response : [];
-    const sessions = rows
-      .filter((item: any) => typeof item?.id === "string" && !item?.time?.archived)
-      .map((item: any) => {
-        const title = typeof item?.title === "string" && item.title.trim() ? item.title.trim() : `Session ${item.id.slice(0, 8)}`;
-        applySessionTitle(item.id, title);
-        const updatedAt =
-          Number(item?.time?.updated ?? item?.time?.created ?? item?.updatedAt ?? item?.createdAt) || 0;
-        return {
-          id: item.id,
-          title,
-          directory: typeof item?.directory === "string" ? item.directory : pluginDirectory,
-          status: "open",
-          updatedAt,
-        };
-      });
-
-    if (!sessions.length) return [fallbackSession()];
-
-    if (activeOpencodeSessionId) {
-      const active = sessions.find((session: { id: string }) => session.id === activeOpencodeSessionId);
-      if (active) {
-        const { updatedAt: _updatedAt, ...rest } = active;
-        return [rest];
-      }
-
-      const activeTitle = sessionTitles.get(activeOpencodeSessionId);
-      if (activeTitle) {
-        return [
-          {
-            id: activeOpencodeSessionId,
-            title: activeTitle,
-            directory: pluginDirectory,
-            status: "open",
-          },
-        ];
-      }
-    }
-
-    sessions.sort((a: { updatedAt: number }, b: { updatedAt: number }) => b.updatedAt - a.updatedAt);
-    const { updatedAt: _updatedAt, ...latest } = sessions[0];
-    return [latest];
-  } catch {
-    return [fallbackSession()];
-  }
-}
-
-function json(res: any, statusCode: number, body: any, origin?: string): void {
-  if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "content-type");
-  res.setHeader("Content-Type", "application/json; charset=utf-8");
-  res.statusCode = statusCode;
-  res.end(JSON.stringify(body));
-}
-
-async function readJsonBody(req: any): Promise<any> {
-  return await new Promise((resolve, reject) => {
-    let data = "";
-    req.on("data", (chunk: Buffer) => {
-      data += chunk.toString("utf8");
-      if (data.length > 10 * 1024 * 1024) reject(new Error("Request body too large"));
-    });
-    req.on("end", () => {
-      try {
-        resolve(data ? JSON.parse(data) : {});
-      } catch {
-        reject(new Error("Invalid JSON body"));
-      }
-    });
-    req.on("error", reject);
-  });
+function rememberClaim(tabId: number, claimedSessionId: string, extensionVersion?: string): void {
+  const now = new Date().toISOString()
+  const prior = claims.get(tabId)
+  const cleanVersion = cleanExtensionVersion(extensionVersion)
+  if (cleanVersion) lastExtensionVersion = cleanVersion
+  claims.set(tabId, {
+    sessionId: claimedSessionId,
+    claimedAt: prior?.claimedAt || now,
+    lastSeenAt: now,
+    extensionVersion: cleanVersion || prior?.extensionVersion,
+  })
 }
 
 function listClaims(): Array<Record<string, any>> {
-  pruneStaleClaims();
+  const cutoff = Date.now() - CLAIM_TTL_MS
+  for (const [tabId, claim] of claims.entries()) {
+    const lastSeen = Date.parse(claim.lastSeenAt)
+    if (!Number.isFinite(lastSeen) || lastSeen < cutoff) claims.delete(tabId)
+  }
   return Array.from(claims.entries())
     .map(([tabId, info]) => ({ tabId, ...info }))
-    .sort((a, b) => a.tabId - b.tabId);
-}
-
-async function queueAnnotationPrompt(sessionId: string, annotation: any): Promise<void> {
-  if (!pluginClient) {
-    setLastAnnotationStatus({ ok: false, sessionId, error: "No OpenCode client is available" });
-    throw new Error("No OpenCode client is available");
-  }
-
-  setLastAnnotationStatus({
-    ok: null,
-    sessionId,
-    phase: "received",
-    commentLength: typeof annotation?.comment === "string" ? annotation.comment.length : 0,
-  });
-
-  let promptText = buildAnnotationPrompt(annotation);
-  const screenshot = annotation?.screenshot;
-  if (screenshot?.dataUrl) {
-    mkdirSync(ANNOTATION_DIR, { recursive: true });
-    const { mime, bytes } = decodeDataUrl(screenshot.dataUrl);
-    const ext = mime === "image/jpeg" ? "jpg" : mime === "image/webp" ? "webp" : "png";
-    const stem = sanitizeFileStem(annotation?.page?.title || annotation?.element?.tag || "annotation");
-    const filePath = join(ANNOTATION_DIR, `${Date.now()}-${stem}.${ext}`);
-    writeFileSync(filePath, bytes);
-    promptText += `\n\nScreenshot: ${filePath}`;
-  }
-
-  const promptBody = { parts: [{ type: "text", text: promptText }] };
-
-  if (typeof pluginClient?.session?.promptAsync === "function") {
-    const response = await pluginClient.session.promptAsync({
-      path: { id: sessionId },
-      query: { directory: pluginDirectory },
-      body: promptBody,
-    });
-    const data = unwrapClientResult(response, "session prompt");
-    if (isExplicitFalse(data)) throw new Error("OpenCode rejected session prompt submission");
-    setLastAnnotationStatus({ ok: true, sessionId, transport: "session.promptAsync", response: data ?? null });
-    return;
-  }
-
-  if (typeof pluginClient?.session?.prompt === "function") {
-    const response = await pluginClient.session.prompt({
-      path: { id: sessionId },
-      query: { directory: pluginDirectory },
-      body: promptBody,
-    });
-    const data = unwrapClientResult(response, "session prompt");
-    if (isExplicitFalse(data)) throw new Error("OpenCode rejected session prompt submission");
-    setLastAnnotationStatus({ ok: true, sessionId, transport: "session.prompt", response: data ?? null });
-    return;
-  }
-
-  const text = promptText;
-
-  const appended = await pluginClient.tui.appendPrompt({
-    query: { directory: pluginDirectory },
-    body: { text },
-  });
-  const appendedData = unwrapClientResult(appended, "tui append prompt");
-  if (isExplicitFalse(appendedData)) throw new Error("OpenCode rejected appending the annotation prompt");
-
-  const submitted = await pluginClient.tui.submitPrompt({ query: { directory: pluginDirectory } });
-  const submittedData = unwrapClientResult(submitted, "tui submit prompt");
-  if (isExplicitFalse(submittedData)) throw new Error("OpenCode rejected submitting the annotation prompt");
-
-  setLastAnnotationStatus({ ok: true, sessionId, transport: "tui", response: appendedData ?? null });
+    .sort((a, b) => a.tabId - b.tabId)
 }
 
 function buildStatus(): Record<string, any> {
   return {
     app: APP_ID,
     version: getPackageVersion(),
-    runtime: {
-      platform: process.platform,
-      node: process.version,
-      tmpdir: tmpdir(),
-      xdgRuntimeDir: Boolean(process.env.XDG_RUNTIME_DIR),
-      uid: typeof process.getuid === "function" ? process.getuid() : null,
-    },
-    instanceId: processSessionId,
-    sessionId: processSessionId,
-    opencodeSessionId: activeOpencodeSessionId,
-    label: pluginSessionLabel,
-    directory: pluginDirectory,
+    instanceId: sessionId,
+    sessionId,
+    label: sessionLabel,
+    directory,
     runtimeBaseDir: BASE_DIR,
     annotationDir: ANNOTATION_DIR,
     logPath: LOG_PATH,
-    server: {
-      status: serverStartupStatus,
-      host: LISTEN_HOST,
-      port: listeningPort,
-      startupError: serverStartupError,
-      bindFailures,
-    },
+    server: { status: serverStatus, host: LISTEN_HOST, port: listeningPort, startupError: serverError },
     port: listeningPort,
     lastExtensionVersion,
     claimTtlMs: CLAIM_TTL_MS,
     claims: listClaims(),
-    lastAnnotation: lastAnnotationStatus,
-  };
+    queued: queue.length,
+  }
 }
 
-async function startServer(): Promise<void> {
-  if (listeningPort) return;
-  serverStartupStatus = "starting";
-  serverStartupError = null;
-  bindFailures.length = 0;
+function json(res: any, statusCode: number, body: any, origin?: string): void {
+  if (origin) res.setHeader("Access-Control-Allow-Origin", origin)
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+  res.setHeader("Access-Control-Allow-Headers", "content-type")
+  res.setHeader("Content-Type", "application/json; charset=utf-8")
+  res.statusCode = statusCode
+  res.end(JSON.stringify(body))
+}
 
-  for (let port = PORT_START; port <= PORT_END; port++) {
-    const server = createServer(async (req, res) => {
-      const origin = typeof req.headers.origin === "string" ? req.headers.origin : "*";
-      if (req.method === "OPTIONS") {
-        json(res, 200, { ok: true }, origin);
-        return;
-      }
-
+async function readJsonBody(req: any): Promise<any> {
+  return await new Promise((resolve, reject) => {
+    let data = ""
+    req.on("data", (chunk: Buffer) => {
+      data += chunk.toString("utf8")
+      if (data.length > 10 * 1024 * 1024) reject(new Error("Request body too large"))
+    })
+    req.on("end", () => {
       try {
-        const url = new URL(req.url || "/", `http://${LISTEN_HOST}:${port}`);
-        if (req.method === "GET" && url.pathname === "/status") {
-          json(res, 200, buildStatus(), origin);
-          return;
-        }
-
-        if (req.method === "GET" && url.pathname === "/sessions") {
-          const sessions = await listOpenCodeSessions();
-          json(
-            res,
-            200,
-            {
-              sessions,
-            },
-            origin
-          );
-          return;
-        }
-
-        if (req.method === "POST" && url.pathname === "/claim") {
-          const body = await readJsonBody(req);
-          const tabId = body?.tabId;
-          const sessionId = body?.sessionId;
-          const extensionVersion = body?.extensionVersion;
-          if (!Number.isFinite(tabId)) throw new Error("tabId is required");
-          if (typeof sessionId !== "string" || !sessionId) throw new Error("sessionId is required");
-          await ensureSessionTitle(sessionId);
-          rememberClaim(Number(tabId), sessionId, extensionVersion);
-          json(res, 200, { ok: true, sessionId }, origin);
-          return;
-        }
-
-        if (req.method === "POST" && url.pathname === "/annotation") {
-          const body = await readJsonBody(req);
-          const tabId = body?.tabId;
-          const sessionId = body?.sessionId;
-          const extensionVersion = body?.extensionVersion;
-          const annotation = body?.annotation;
-          if (!Number.isFinite(tabId)) throw new Error("tabId is required");
-          if (typeof sessionId !== "string" || !sessionId) throw new Error("sessionId is required");
-          if (!annotation || typeof annotation !== "object") throw new Error("annotation is required");
-
-          rememberClaim(Number(tabId), sessionId, extensionVersion);
-
-          await queueAnnotationPrompt(sessionId, { ...annotation, tabId: Number(tabId) });
-          json(res, 200, { ok: true, sessionId }, origin);
-          return;
-        }
-
-        if (req.method === "POST" && url.pathname === "/unclaim") {
-          const body = await readJsonBody(req);
-          const tabId = body?.tabId;
-          const extensionVersion = body?.extensionVersion;
-          const cleanVersion = cleanExtensionVersion(extensionVersion);
-          if (cleanVersion) lastExtensionVersion = cleanVersion;
-          if (!Number.isFinite(tabId)) throw new Error("tabId is required");
-          claims.delete(Number(tabId));
-          json(res, 200, { ok: true }, origin);
-          return;
-        }
-
-        json(res, 404, { ok: false, error: "Not found" }, origin);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logDebug(`http error path=${req.url || ""} error=${message}`);
-        json(res, 400, { ok: false, error: message }, origin);
+        resolve(data ? JSON.parse(data) : {})
+      } catch {
+        reject(new Error("Invalid JSON body"))
       }
-    });
+    })
+    req.on("error", reject)
+  })
+}
 
+function handleRequest(port: number) {
+  return async (req: any, res: any) => {
+    const origin = typeof req.headers.origin === "string" ? req.headers.origin : "*"
+    if (req.method === "OPTIONS") {
+      json(res, 200, { ok: true }, origin)
+      return
+    }
+
+    try {
+      const url = new URL(req.url || "/", `http://${LISTEN_HOST}:${port}`)
+
+      if (req.method === "GET" && url.pathname === "/status") {
+        json(res, 200, buildStatus(), origin)
+        return
+      }
+
+      // One server process per agent session, so there is exactly one session.
+      if (req.method === "GET" && url.pathname === "/sessions") {
+        json(res, 200, { sessions: [{ id: sessionId, title: sessionLabel, directory, status: "open" }] }, origin)
+        return
+      }
+
+      if (req.method === "POST" && url.pathname === "/claim") {
+        const body = await readJsonBody(req)
+        if (!Number.isFinite(body?.tabId)) throw new Error("tabId is required")
+        if (typeof body?.sessionId !== "string" || !body.sessionId) throw new Error("sessionId is required")
+        rememberClaim(Number(body.tabId), body.sessionId, body?.extensionVersion)
+        json(res, 200, { ok: true, sessionId: body.sessionId }, origin)
+        return
+      }
+
+      if (req.method === "POST" && url.pathname === "/annotation") {
+        const body = await readJsonBody(req)
+        if (!Number.isFinite(body?.tabId)) throw new Error("tabId is required")
+        if (typeof body?.sessionId !== "string" || !body.sessionId) throw new Error("sessionId is required")
+        if (!body?.annotation || typeof body.annotation !== "object") throw new Error("annotation is required")
+
+        rememberClaim(Number(body.tabId), body.sessionId, body?.extensionVersion)
+        queue.push({
+          receivedAt: new Date().toISOString(),
+          tabId: Number(body.tabId),
+          annotation: body.annotation,
+          screenshotPath: saveScreenshot(body.annotation),
+        })
+        while (queue.length > QUEUE_LIMIT) queue.shift()
+        logDebug(`annotation queued tab=${body.tabId} depth=${queue.length}`)
+        json(res, 200, { ok: true, sessionId: body.sessionId, queued: queue.length }, origin)
+        return
+      }
+
+      if (req.method === "POST" && url.pathname === "/unclaim") {
+        const body = await readJsonBody(req)
+        const cleanVersion = cleanExtensionVersion(body?.extensionVersion)
+        if (cleanVersion) lastExtensionVersion = cleanVersion
+        if (!Number.isFinite(body?.tabId)) throw new Error("tabId is required")
+        claims.delete(Number(body.tabId))
+        json(res, 200, { ok: true }, origin)
+        return
+      }
+
+      json(res, 404, { ok: false, error: "Not found" }, origin)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      logDebug(`http error path=${req.url || ""} error=${message}`)
+      json(res, 400, { ok: false, error: message }, origin)
+    }
+  }
+}
+
+async function startHttpServer(): Promise<void> {
+  for (let port = PORT_START; port <= PORT_END; port++) {
+    const server = createServer(handleRequest(port))
     const started = await new Promise<boolean>((resolve) => {
       server.once("error", (error: NodeJS.ErrnoException) => {
-        const failure = {
-          port,
-          code: error.code,
-          message: error.message,
-        };
-        bindFailures.push(failure);
-        logDebug(`http bind failed port=${port} code=${failure.code || ""} error=${failure.message}`);
-        resolve(false);
-      });
-      server.listen(port, LISTEN_HOST, () => resolve(true));
-    });
-
-    if (!started) continue;
-    httpServer = server;
-    listeningPort = port;
-    serverStartupStatus = "listening";
-    logDebug(`http server listening port=${port} session=${processSessionId} label=${JSON.stringify(pluginSessionLabel)}`);
-    return;
+        logDebug(`bind failed port=${port} code=${error.code || ""}`)
+        resolve(false)
+      })
+      server.listen(port, LISTEN_HOST, () => resolve(true))
+    })
+    if (!started) continue
+    httpServer = server
+    listeningPort = port
+    serverStatus = "listening"
+    logDebug(`listening port=${port} session=${sessionId} dir=${directory}`)
+    return
   }
 
-  serverStartupStatus = "failed";
-  serverStartupError = `Could not bind OpenCode annotation server on ${LISTEN_HOST} ports ${PORT_START}-${PORT_END}`;
-  throw new Error(serverStartupError);
+  serverStatus = "failed"
+  serverError = `Could not bind on ${LISTEN_HOST} ports ${PORT_START}-${PORT_END}`
+  throw new Error(serverError)
 }
 
-const plugin: Plugin = async (ctx) => {
-  pluginClient = ctx.client;
-  pluginDirectory = ctx.directory || process.cwd();
-  pluginSessionLabel = buildSessionLabel(ctx.worktree || pluginDirectory);
+const mcp = new McpServer({ name: APP_ID, version: getPackageVersion() })
 
-  startServer().catch((error) => {
-    serverStartupStatus = "failed";
-    serverStartupError = error instanceof Error ? error.message : String(error);
-    logDebug(`server startup failed error=${serverStartupError}`);
-  });
+mcp.registerTool(
+  "get_annotations",
+  {
+    title: "Get browser annotations",
+    description:
+      "Drain pending browser annotations left by the user. Each one has a comment, the DOM element it was anchored to, page URL, and a screenshot file path. Call this when the user refers to feedback they left in the browser.",
+    inputSchema: {},
+  },
+  async () => {
+    const drained = queue.splice(0, queue.length)
+    if (!drained.length) {
+      const hint =
+        serverStatus === "listening"
+          ? `No pending annotations. Server is listening on port ${listeningPort}; connect a tab from the extension and annotate.`
+          : `No pending annotations. Annotation server is ${serverStatus}${serverError ? `: ${serverError}` : ""}.`
+      return { content: [{ type: "text" as const, text: hint }] }
+    }
+    logDebug(`drained ${drained.length} annotation(s)`)
+    const body = drained.map(formatAnnotation).join("\n\n")
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: `${drained.length} annotation(s) from the browser. Read the screenshot paths with the Read tool if you need the visual.\n\n${body}`,
+        },
+      ],
+    }
+  }
+)
 
-  return {
-    event: async ({ event }) => {
-      const info = (event as any)?.properties?.info;
-      if ((event as any)?.type === "session.created" || (event as any)?.type === "session.updated") {
-        if (typeof info?.id === "string" && typeof info?.title === "string") {
-          applySessionTitle(info.id, info.title);
-        }
-      }
-      if ((event as any)?.type === "session.deleted" && typeof info?.id === "string") {
-        sessionTitles.delete(info.id);
-        if (activeOpencodeSessionId === info.id) {
-          activeOpencodeSessionId = null;
-          pluginSessionLabel = buildSessionLabel(pluginDirectory);
-        }
-      }
-    },
-    "chat.message": async (input) => {
-      if (!input?.sessionID) return;
-      activeOpencodeSessionId = input.sessionID;
-      if (sessionTitles.has(input.sessionID)) {
-        pluginSessionLabel = sessionTitles.get(input.sessionID) as string;
-        return;
-      }
-      await ensureSessionTitle(input.sessionID);
-    },
-    tool: {
-      chrome_status: {
-        description: "Report OpenCode Chrome Annotation local server, session, tab claim, and last annotation status.",
-        args: {},
-        execute: async () => JSON.stringify(buildStatus(), null, 2),
-      },
-    },
-  };
-};
+startHttpServer().catch((error) => {
+  serverStatus = "failed"
+  serverError = error instanceof Error ? error.message : String(error)
+  logDebug(`startup failed: ${serverError}`)
+})
 
-export default plugin;
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => {
+    httpServer?.close()
+    process.exit(0)
+  })
+}
+
+await mcp.connect(new StdioServerTransport())

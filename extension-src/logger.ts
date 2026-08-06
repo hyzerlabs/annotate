@@ -1,23 +1,23 @@
 export function logExtension(message: string, details?: unknown) {
   if (details === undefined) {
-    console.log(`[OpenCode] ${message}`)
+    console.log(`[hyzer-annotate] ${message}`)
     return
   }
-  console.log(`[OpenCode] ${message}`, details)
+  console.log(`[hyzer-annotate] ${message}`, details)
 }
 
 export function warnExtension(message: string, details?: unknown) {
   if (details === undefined) {
-    console.warn(`[OpenCode] ${message}`)
+    console.warn(`[hyzer-annotate] ${message}`)
     return
   }
-  console.warn(`[OpenCode] ${message}`, details)
+  console.warn(`[hyzer-annotate] ${message}`, details)
 }
 
 export function errorExtension(message: string, details?: unknown) {
   if (details === undefined) {
-    console.error(`[OpenCode] ${message}`)
+    console.error(`[hyzer-annotate] ${message}`)
     return
   }
-  console.error(`[OpenCode] ${message}`, details)
+  console.error(`[hyzer-annotate] ${message}`, details)
 }

@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "OpenCode Chrome Annotation",
-  "short_name": "OpenCode Annotation",
-  "version": "1.0.1",
-  "description": "Annotate pages and send context into your local OpenCode setup",
-  "homepage_url": "https://github.com/jodusnodus/opencode-chrome-annotation",
+  "name": "hyzer-annotate",
+  "short_name": "hyzer-annotate",
+  "version": "0.1.0",
+  "description": "Annotate any page and send the element, screenshot, and your comment to your local coding agent",
+  "homepage_url": "https://github.com/hyzerlabs/hyzer-annotate",
   "permissions": [
     "tabs",
     "activeTab",
@@ -33,7 +33,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "OpenCode Chrome Annotation",
+    "default_title": "hyzer-annotate",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

@@ -76,7 +76,7 @@ export function createConnectionMonitor({ claimedTabs, removeConnectionOverlay, 
       await removeConnectionOverlay(tabId)
     }
 
-    warnExtension("Lost connection to OpenCode instance", {
+    warnExtension("Lost connection to annotation server", {
       disconnectedInstances: Array.from(disconnected),
       remainingClaims: claimedTabs.size(),
     })
