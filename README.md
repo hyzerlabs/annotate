@@ -56,27 +56,42 @@ Open `brave://extensions` (or `chrome://extensions`), enable Developer mode, cli
 
 ### Optional: a `/fb` shortcut
 
-Asking your agent to "check annotations" works fine. A slash command is shorter. Save this as `~/.claude/commands/fb.md`:
+Asking your agent to "check annotations" works fine. A slash command is shorter — `/fb`, for feedback — and this one groups the queue into tasks and gets them agreed before it edits anything. Save it as `~/.claude/commands/fb.md`:
 
 ```markdown
 ---
-description: Drain the browser annotation queue and act on the feedback
+description: Read the browser annotation queue and turn it into an agreed plan
 ---
 
-Call `get_annotations` to drain the browser annotation queue.
+Call `get_annotations` to read the browser annotation queue. It empties the
+queue as it reads, so hold on to what comes back — a second call returns
+nothing.
 
 For each annotation: the comment is the ask, the selector and element metadata
 say where, and the screenshot path is there when you need to see it — read it
 if the comment is visual ("this looks wrong", "spacing is off"), skip it if the
 comment already tells you what to change.
 
-Then do the work. Group annotations that touch the same component into one edit
-rather than fixing them one at a time.
+Then, before editing anything, propose a plan:
+
+- Group the annotations by the area they touch (component, page, module), and
+  label each group by type — bugfix, nit, feature, question, unclear.
+- Turn each group into one task. Annotations on the same component belong in
+  one task, not one per annotation.
+- Order them: bugs before nits, and anything the user has to answer first.
+- Show the list with a one-line summary per task and the annotations feeding
+  it. Ask the user to confirm, drop, or reorder, and to answer anything you
+  marked unclear.
+
+Once they confirm, put the agreed tasks on the todo list and work them one at
+a time. Finish a task, say what changed in a line or two, then start the next
+— so the user can redirect between tasks instead of after all of them. If
+their feedback changes the remaining plan, update the todos and say so.
 
 $ARGUMENTS
 ```
 
-Then `/fb` drains and acts, or `/fb just summarize, don't edit` to steer it.
+Then `/fb` reads the queue and proposes a plan, or `/fb just summarize, don't edit` to steer it.
 
 ![Claude Code with /fb typed at the prompt, showing the command's description](docs/agent1.png)
 
@@ -87,7 +102,7 @@ Then `/fb` drains and acts, or `/fb just summarize, don't edit` to steer it.
    - **Annotate** — click the element you want to talk about, then comment on it.
    - **Capture** — comment on the page as a whole, no element picking.
 3. Submit. Repeat as many times as you like.
-4. Tell your agent to check the annotations, or run `/fb` if you added the command above. Either way it calls `get_annotations`, which drains everything you've queued.
+4. Tell your agent to check the annotations, or run `/fb` if you added the command above. Either way it calls `get_annotations`, which hands over everything you've queued and empties the queue.
 
 There's no "send" step to remember. Every annotation POSTs the moment you submit it, and the agent collects the whole queue in one call.
 

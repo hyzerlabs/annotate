@@ -132,7 +132,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
         h(
           "button",
           {
-            attrs: { class: "btn-icon", type: "button", "aria-label": "Close session picker" },
+            attrs: { class: "btn-icon btn-icon-danger", type: "button", "aria-label": "Close session picker" },
             on: { click: close },
           },
           [closeIcon()]

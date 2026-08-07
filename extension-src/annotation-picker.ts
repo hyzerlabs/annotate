@@ -104,10 +104,13 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
     const box = h("div", { attrs: { class: "highlight" } })
     box.style.display = "none"
 
-    const targetInfo = h("div", { attrs: { class: "target" } })
+    const targetInfo = h("div", {
+      attrs: { class: "target", title: "Click to expand" },
+      on: { click: () => targetInfo.classList.toggle("expanded") },
+    })
     const textarea = h("textarea") as HTMLTextAreaElement
     textarea.placeholder =
-      mode === "page" ? "What should the agent know about this page?" : "What should the agent change here?"
+      mode === "page" ? "What should the agent know about this page?" : "What should the agent know?"
 
     const cancelButton = h("button", {
       text: "Cancel",
@@ -139,8 +142,12 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
     root.replaceChildren(box, panel)
 
     // The default blocked-controls list covers the textarea and buttons, so text
-    // selection in the comment box works and the controls stay clickable.
-    const drag = makeDraggable(panel)
+    // selection in the comment box works and the controls stay clickable. The
+    // selector chip has to join them: a drag captures the pointer, and a captured
+    // pointer sends the click to the panel instead of the chip.
+    const drag = makeDraggable(panel, {
+      blockDragSelector: "button, input, label, textarea, select, a, .target",
+    })
 
     return { host, root, box, panel, targetInfo, textarea, cancelButton, submitButton, screenshotToggle, drag }
   }
