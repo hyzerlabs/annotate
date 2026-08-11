@@ -4,6 +4,8 @@ Click an element in your browser, type what's wrong with it, and your coding age
 
 Works with any agent that speaks MCP. Nothing leaves your machine.
 
+[**Install from the Chrome Web Store**](https://chromewebstore.google.com/detail/hyzer-annotate/comdikkcgnejdcjkaknlmnppnecekcpi)
+
 ![The connection pill and the annotate composer over a selected heading, with the element's selector filled in](docs/ui-crop.png)
 
 ## How it works
@@ -14,7 +16,7 @@ There's one server process per agent session, so the session picker lists one en
 
 ## Setup
 
-Two halves: the MCP server your agent talks to, and the browser extension. The server comes from npm. The extension has to be built from source for now, since it isn't in the Chrome Web Store yet.
+Two halves: the MCP server your agent talks to, and the browser extension. The server comes from npm, the extension from the Chrome Web Store.
 
 ### The MCP server
 
@@ -45,6 +47,10 @@ Restart the agent after adding it.
 
 ### The extension
 
+[Install it from the Chrome Web Store](https://chromewebstore.google.com/detail/hyzer-annotate/comdikkcgnejdcjkaknlmnppnecekcpi). Works in Chrome and other Chromium browsers — Brave, Edge, Arc.
+
+Or build it from source:
+
 ```sh
 git clone https://github.com/hyzerlabs/annotate.git
 cd annotate
@@ -52,7 +58,7 @@ npm install
 npm run build:extension
 ```
 
-Open `brave://extensions` (or `chrome://extensions`), enable Developer mode, click "Load unpacked", and select the `extension/` directory.
+Then open `brave://extensions` (or `chrome://extensions`), enable Developer mode, click "Load unpacked", and select the `extension/` directory.
 
 ### Optional: a `/fb` shortcut
 
