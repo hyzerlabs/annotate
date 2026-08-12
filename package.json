@@ -1,6 +1,6 @@
 {
   "name": "@hyzer-labs/annotate",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Annotate any page in the browser and send the element, screenshot, and your comment to your local coding agent over MCP.",
   "type": "module",
   "main": "./dist/server.js",
