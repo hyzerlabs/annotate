@@ -105,20 +105,22 @@ Then `/fb` reads the queue and proposes a plan, or `/fb just summarize, don't ed
 
 1. Click the extension icon and connect the tab to your agent session.
 2. In the in-page pill, choose either:
-   - **Annotate** — click the element you want to talk about, then comment on it.
-   - **Capture** — comment on the page as a whole, no element picking.
+   - **Annotate** (`Alt+Shift+A`) — click the element you want to talk about, then comment on it.
+   - **Capture** (`Alt+Shift+C`) — comment on the page as a whole, no element picking.
 3. Submit. Repeat as many times as you like.
 4. Tell your agent to check the annotations, or run `/fb` if you added the command above. Either way it calls `get_annotations`, which hands over everything you've queued and empties the queue.
 
 There's no "send" step to remember. Every annotation POSTs the moment you submit it, and the agent collects the whole queue in one call.
 
-Use the **×** in the pill to disconnect the tab. It also disconnects on its own when you close the tab, navigate to a different origin, or stop the agent.
+The rest of the pill: click **Connected: _name_** to switch the tab to a different agent session, the wrench for settings, and the **×** to disconnect. It also disconnects on its own when you close the tab, navigate to a different origin, or stop the agent.
+
+The pill is draggable — drop it wherever it's out of your way and it stays there across navigation.
 
 ## Screenshots
 
 Every annotation carries one unless you clear **Include screenshot** in the composer. **Annotate** crops to the element you picked, with a little padding for context. **Capture** stitches the whole scrollable page together from viewport captures. Either way the image is written to a temp directory and handed to the agent as a file path, so it only loads the image when it needs to.
 
-The pill hides itself during capture so it stays out of the shot.
+The pill and the settings popup hide themselves during capture so they stay out of the shot — but only when they'd actually be in frame, and never when the thing you're annotating *is* one of them.
 
 Two things worth knowing about full-page capture:
 
@@ -127,9 +129,19 @@ Two things worth knowing about full-page capture:
 
 Images are swept once they're more than six hours old, rather than when the queue drains. The agent reads those paths *after* `get_annotations` returns, so deleting on drain would hand it dead paths. Anything still queued is never swept, however old it gets.
 
+## Settings
+
+The wrench in the pill opens a popup beside it, holding three things:
+
+- **Keep queue across restarts** — see below.
+- **Annotation outline** — the colour of the box that follows your cursor while picking an element. Left alone it follows the light/dark theme; **Default** puts it back after you've picked a colour.
+- **Keyboard shortcuts** — the current bindings for annotate and capture. Chrome owns extension shortcuts, so **Change shortcuts** hands you to `chrome://extensions/shortcuts`, the only place they can be rebound. If another extension already claimed `Alt+Shift+A` or `Alt+Shift+C`, yours will show as *Not set* until you assign one there.
+
+The outline colour is stored in the browser. The queue setting belongs to the agent's server, so it follows the session rather than the browser.
+
 ## Keeping the queue across restarts
 
-The queue lives in memory, so restarting your agent discards anything you haven't asked it to read yet. Tick **Keep queue across restarts** in the pill to write it to the runtime directory instead. The setting is stored there too, since a toggle that reset on restart would forget at exactly the wrong moment.
+The queue lives in memory, so restarting your agent discards anything you haven't asked it to read yet. Tick **Keep queue across restarts** in settings to write it to the runtime directory instead. The setting is stored there too, since a toggle that reset on restart would forget at exactly the wrong moment.
 
 It's off by default. It applies to every project rather than per-repo, being a preference about your machine rather than about any one codebase, and the saved copy is discarded as soon as the agent drains the queue.
 

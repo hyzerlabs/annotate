@@ -5,34 +5,20 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
   const shadow = globalThis.__opc_shadow!
   const makeDraggable = globalThis.__opc_makeDraggable!
   const renderPill = globalThis.__opc_renderPill!
+  const svgIcon = globalThis.__opc_svgIcon!
+  const shieldKeys = globalThis.__opc_shieldKeys!
   if (
     typeof h !== "function" ||
     typeof shadow !== "function" ||
     typeof makeDraggable !== "function" ||
-    typeof renderPill !== "function"
+    typeof renderPill !== "function" ||
+    typeof svgIcon !== "function" ||
+    typeof shieldKeys !== "function"
   ) {
     throw new Error("Annotation UI helpers are unavailable")
   }
 
-  if (typeof globalThis.__opc_cleanupSessionPicker === "function") {
-    globalThis.__opc_cleanupSessionPicker()
-  }
-
-  function closeIcon() {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
-    svg.setAttribute("viewBox", "0 0 12 12")
-    svg.setAttribute("width", "11")
-    svg.setAttribute("height", "11")
-    svg.setAttribute("aria-hidden", "true")
-
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
-    path.setAttribute("d", "M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5")
-    path.setAttribute("stroke", "currentColor")
-    path.setAttribute("stroke-width", "1.6")
-    path.setAttribute("stroke-linecap", "round")
-    svg.appendChild(path)
-    return svg
-  }
+  globalThis.__opc_cleanupPanel?.()
 
   function sessionButton(item: SessionInfo, onSelect: () => void) {
     return h(
@@ -102,7 +88,6 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
   // Read the pill's state before it is replaced, so closing restores it.
   const priorSession = root.querySelector(".session")?.textContent || "agent session"
   const priorQueued = Number(root.querySelector("[data-role='queue-count']")?.textContent) || 0
-  const priorPersist = (root.querySelector("[data-role='persist-input']") as HTMLInputElement | null)?.checked === true
   const drag = makeDraggable(host, {
     onDrop: (dropped) => {
       try {
@@ -120,7 +105,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
       host.remove()
       return
     }
-    renderPill(root, host, priorSession, priorQueued, priorPersist, priorPosition)
+    renderPill(root, host, priorSession, priorQueued, priorPosition)
   }
 
   const heading = items.length ? "Connect this tab to a local agent session" : "No agent session available"
@@ -135,7 +120,7 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
             attrs: { class: "btn-icon btn-icon-danger", type: "button", "aria-label": "Close session picker" },
             on: { click: close },
           },
-          [closeIcon()]
+          [svgIcon("M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5")]
         ),
       ]),
       items.length
@@ -193,13 +178,18 @@ function sessionPickerScript(items: SessionInfo[], context: SessionPickerContext
 
   function cleanupKeyboard() {
     document.removeEventListener("keydown", onKeyDown, true)
-    if (globalThis.__opc_cleanupSessionPicker === cleanupKeyboard) {
-      delete globalThis.__opc_cleanupSessionPicker
+    shield.remove()
+    if (globalThis.__opc_cleanupPanel === cleanupKeyboard) {
+      delete globalThis.__opc_cleanupPanel
     }
   }
 
+  // Arrow/Enter/Escape inside the picker are stopped at window capture, so a
+  // page that owns those keys never sees them; keys outside it still arrive on
+  // the document listener.
+  const shield = shieldKeys(host, onKeyDown)
   document.addEventListener("keydown", onKeyDown, true)
-  globalThis.__opc_cleanupSessionPicker = cleanupKeyboard
+  globalThis.__opc_cleanupPanel = cleanupKeyboard
   setFocusedIndex(0)
 }
 

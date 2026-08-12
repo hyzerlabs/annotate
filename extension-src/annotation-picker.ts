@@ -1,16 +1,19 @@
+import { OUTLINE_COLOR_KEY } from "./constants.js"
 import { logExtension, warnExtension } from "./logger.js"
 import type { AnnotationElement, AnnotationMode, AnnotationPickerResult, AnnotationViewport } from "./types.js"
 
-function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerResult> {
+function annotationPickerScript(mode: AnnotationMode, outlineColor: string | null): Promise<AnnotationPickerResult> {
   const h = globalThis.__opc_h!
   const shadow = globalThis.__opc_shadow!
   const makeDraggable = globalThis.__opc_makeDraggable!
   const anchorTo = globalThis.__opc_anchorTo!
+  const shieldKeys = globalThis.__opc_shieldKeys!
   if (
     typeof h !== "function" ||
     typeof shadow !== "function" ||
     typeof makeDraggable !== "function" ||
-    typeof anchorTo !== "function"
+    typeof anchorTo !== "function" ||
+    typeof shieldKeys !== "function"
   ) {
     throw new Error("Annotation UI helpers are unavailable")
   }
@@ -100,6 +103,8 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
   function createUI() {
     document.getElementById("__opc_annotation_root")?.remove()
     const { host, root } = shadow("__opc_annotation_root", "picker")
+    // Only the highlight box reads this; unset, it stays on the theme token.
+    if (outlineColor) host.style.setProperty("--opc-outline", outlineColor)
 
     const box = h("div", { attrs: { class: "highlight" } })
     box.style.display = "none"
@@ -174,10 +179,16 @@ function annotationPickerScript(mode: AnnotationMode): Promise<AnnotationPickerR
       finished: false,
     }
 
+    // Keys typed into the composer never reach the document listener below —
+    // the shield stops them at window capture so the page cannot eat them, and
+    // hands keydown straight back to us.
+    const shield = shieldKeys(ui.host, onKeyDown)
+
     function removeListeners() {
       document.removeEventListener("mousemove", onMouseMove, true)
       document.removeEventListener("click", onClick, true)
       document.removeEventListener("keydown", onKeyDown, true)
+      shield.remove()
     }
 
     function finish(resultPayload: AnnotationPickerResult) {
@@ -304,10 +315,11 @@ export async function runAnnotationPicker(tabId: number, mode: AnnotationMode): 
     world: "ISOLATED",
     files: ["injected/dom.js"],
   })
+  const stored = await chrome.storage.local.get(OUTLINE_COLOR_KEY)
   const result = await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
-    args: [mode],
+    args: [mode, typeof stored[OUTLINE_COLOR_KEY] === "string" ? stored[OUTLINE_COLOR_KEY] : null],
     func: annotationPickerScript,
   })
 

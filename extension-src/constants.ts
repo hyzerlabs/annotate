@@ -11,3 +11,6 @@ export const CAPTURE_MIN_INTERVAL_MS = 550
 export const CAPTURE_ELEMENT_PADDING_PX = 12
 // A tall page at ~0.55s per band gets slow fast; 12 bands is ~7s.
 export const CAPTURE_MAX_BANDS = 12
+
+// chrome.storage.local: a browser-side preference, not part of any agent session.
+export const OUTLINE_COLOR_KEY = "outlineColor"

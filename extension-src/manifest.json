@@ -21,6 +21,16 @@
     "service_worker": "background.js",
     "type": "module"
   },
+  "commands": {
+    "annotate": {
+      "suggested_key": { "default": "Alt+Shift+A" },
+      "description": "Annotate an element"
+    },
+    "capture": {
+      "suggested_key": { "default": "Alt+Shift+C" },
+      "description": "Comment on the whole page"
+    }
+  },
   "action": {
     "default_title": "hyzer-annotate",
     "default_icon": {

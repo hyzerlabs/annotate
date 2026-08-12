@@ -15,17 +15,16 @@ export async function injectConnectionOverlay(tabId: number, claim?: TabClaim): 
       args: [
         claim?.sessionLabel || claim?.sessionId || "agent session",
         claim?.queued || 0,
-        claim?.persistQueue === true,
         claim?.position || null,
       ],
-      func: (sessionLabel: string, queued: number, persistQueue: boolean, position: OpcPosition | null) => {
+      func: (sessionLabel: string, queued: number, position: OpcPosition | null) => {
         const shadow = globalThis.__opc_shadow
         const renderPill = globalThis.__opc_renderPill
         if (typeof shadow !== "function" || typeof renderPill !== "function") {
           throw new Error("Annotation UI helpers are unavailable")
         }
         const { host, root } = shadow("__opc_connection_overlay", "dock")
-        renderPill(root, host, sessionLabel, queued, persistQueue, position)
+        renderPill(root, host, sessionLabel, queued, position)
       },
     })
   } catch (error) {
@@ -53,8 +52,9 @@ export async function setConnectionOverlayQueue(tabId: number, queued: number): 
 }
 
 /**
- * Hides the pill only if it would actually appear in what we are about to
- * capture, and reports whether it did.
+ * Hides our own chrome — the pill and the settings popup — but only the parts
+ * that would actually appear in what we are about to capture, and reports
+ * whether anything was hidden.
  *
  * `region` is the area being captured in viewport CSS pixels, or null for the
  * whole page. Element crops usually do not include the pill at all, and hiding
@@ -72,17 +72,17 @@ export async function hideOverlayForCapture(
       world: "ISOLATED",
       args: [region],
       func: (area: { left: number; top: number; right: number; bottom: number } | null) => {
-        const overlay = document.getElementById("__opc_connection_overlay")
-        if (!overlay) return false
+        const overlays = ["__opc_connection_overlay", "__opc_settings_root"]
+          .map((id) => document.getElementById(id))
+          .filter((overlay): overlay is HTMLElement => {
+            if (!overlay) return false
+            if (!area) return true
+            const rect = overlay.getBoundingClientRect()
+            return rect.left < area.right && rect.right > area.left && rect.top < area.bottom && rect.bottom > area.top
+          })
+        if (!overlays.length) return false
 
-        if (area) {
-          const rect = overlay.getBoundingClientRect()
-          const overlaps =
-            rect.left < area.right && rect.right > area.left && rect.top < area.bottom && rect.bottom > area.top
-          if (!overlaps) return false
-        }
-
-        overlay.style.visibility = "hidden"
+        for (const overlay of overlays) overlay.style.visibility = "hidden"
         return new Promise<boolean>((resolve) => {
           requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))
         })
@@ -94,14 +94,18 @@ export async function hideOverlayForCapture(
   }
 }
 
+/** Puts back whatever hideOverlayForCapture hid; unconditional, so it is safe
+ * to call when nothing was hidden. */
 export async function showConnectionOverlay(tabId: number): Promise<void> {
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
       world: "ISOLATED",
       func: () => {
-        const overlay = document.getElementById("__opc_connection_overlay")
-        if (overlay) overlay.style.visibility = ""
+        for (const id of ["__opc_connection_overlay", "__opc_settings_root"]) {
+          const overlay = document.getElementById(id)
+          if (overlay) overlay.style.visibility = ""
+        }
       },
     })
   } catch {
@@ -115,6 +119,11 @@ export async function removeConnectionOverlay(tabId: number): Promise<void> {
       target: { tabId },
       world: "ISOLATED",
       func: () => {
+        // The settings popup is a sibling of the pill now, so it has to go with
+        // it — a disconnected tab keeping a floating settings panel is chrome
+        // for a connection that no longer exists.
+        globalThis.__opc_cleanupSettings?.()
+        document.getElementById("__opc_settings_root")?.remove()
         document.getElementById("__opc_connection_overlay")?.remove()
       },
     })

@@ -23,6 +23,53 @@ globalThis.__opc_h = function h(tag: string, { text, style, attrs, on }: OpcElem
   return node
 }
 
+/**
+ * An icon from one path, stroked by default. Every overlay was building its own
+ * close icon by hand; the third copy was the one that stopped being worth it.
+ */
+globalThis.__opc_svgIcon = function svgIcon(d: string, options: OpcIconOptions = {}) {
+  const { viewBox = "0 0 12 12", size = 11, strokeWidth = 1.6 } = options
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+  svg.setAttribute("viewBox", viewBox)
+  svg.setAttribute("width", String(size))
+  svg.setAttribute("height", String(size))
+  svg.setAttribute("aria-hidden", "true")
+
+  const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
+  path.setAttribute("d", d)
+  path.setAttribute("fill", "none")
+  path.setAttribute("stroke", "currentColor")
+  path.setAttribute("stroke-width", String(strokeWidth))
+  path.setAttribute("stroke-linecap", "round")
+  path.setAttribute("stroke-linejoin", "round")
+  svg.appendChild(path)
+  return svg
+}
+
+const CLOSE_ICON_PATH = "M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5"
+
+/**
+ * An open-end spanner: a C-shaped jaw with a handle running to the opposite
+ * corner. Two strokes and no fill, so it reads as a tool without pulling the
+ * eye the way a cog's teeth do at this size — a gear is all high-frequency
+ * detail, and at 14px that detail turns into noise.
+ */
+const WRENCH_ICON_PATH = (() => {
+  const HEAD = 8.2
+  const RADIUS = 4
+  // The jaw opens away from the handle, which runs out at 45° to the corner.
+  const HANDLE_ANGLE = 45
+  const JAW_HALF_WIDTH = 58
+  const at = (degrees: number) => {
+    const radians = (degrees * Math.PI) / 180
+    return `${(HEAD + Math.cos(radians) * RADIUS).toFixed(2)} ${(HEAD + Math.sin(radians) * RADIUS).toFixed(2)}`
+  }
+
+  const start = HANDLE_ANGLE + 180 + JAW_HALF_WIDTH
+  const end = HANDLE_ANGLE + 180 - JAW_HALF_WIDTH + 360
+  return `M${at(start)} A${RADIUS} ${RADIUS} 0 ${end - start > 180 ? 1 : 0} 1 ${at(end)} M${at(HANDLE_ANGLE)} L19.4 19.4`
+})()
+
 let sheet: CSSStyleSheet | null = null
 
 function overlaySheet(): CSSStyleSheet {
@@ -42,7 +89,13 @@ function overlaySheet(): CSSStyleSheet {
  */
 globalThis.__opc_shadow = function shadow(hostId: string, kind: "dock" | "picker") {
   const existing = document.getElementById(hostId)
-  if (existing?.shadowRoot) return { host: existing, root: existing.shadowRoot, existed: true }
+  if (existing?.shadowRoot) {
+    // Re-adopt rather than reuse. A host outlives the script that made it — an
+    // extension update or a reload injects new markup into the old shadow root,
+    // and keeping its old sheet renders the new UI under the previous CSS.
+    existing.shadowRoot.adoptedStyleSheets = [overlaySheet()]
+    return { host: existing, root: existing.shadowRoot, existed: true }
+  }
 
   const host = existing || document.createElement("div")
   host.id = hostId
@@ -61,12 +114,12 @@ globalThis.__opc_renderPill = function renderPill(
   host: HTMLElement,
   sessionLabel: string,
   queued: number,
-  persistQueue: boolean,
   position?: OpcPosition | null
 ) {
   const h = globalThis.__opc_h!
   const makeDraggable = globalThis.__opc_makeDraggable!
-  if (typeof h !== "function" || typeof makeDraggable !== "function") {
+  const svgIcon = globalThis.__opc_svgIcon!
+  if (typeof h !== "function" || typeof makeDraggable !== "function" || typeof svgIcon !== "function") {
     throw new Error("Annotation UI helpers are unavailable")
   }
 
@@ -80,62 +133,38 @@ globalThis.__opc_renderPill = function renderPill(
     }
   }
 
-  function closeIcon() {
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
-    svg.setAttribute("viewBox", "0 0 12 12")
-    svg.setAttribute("width", "11")
-    svg.setAttribute("height", "11")
-    svg.setAttribute("aria-hidden", "true")
-
-    const path = document.createElementNS("http://www.w3.org/2000/svg", "path")
-    path.setAttribute("d", "M2.5 2.5 L9.5 9.5 M9.5 2.5 L2.5 9.5")
-    path.setAttribute("stroke", "currentColor")
-    path.setAttribute("stroke-width", "1.6")
-    path.setAttribute("stroke-linecap", "round")
-    svg.appendChild(path)
-    return svg
-  }
-
-  const status = h("span", { attrs: { class: "status", "data-role": "label" } }, [
-    h("span", { text: "Connected:" }),
-    h("span", { text: sessionLabel, attrs: { class: "session", title: sessionLabel } }),
-  ])
-
-  const persistInput = h("input", { attrs: { type: "checkbox", "data-role": "persist-input" } }) as HTMLInputElement
-  persistInput.checked = persistQueue
-  // The box flips itself on click, before the server has agreed. On success the
-  // pill is re-rendered with the new state; on failure nothing else would put
-  // the box back, so it would sit there claiming a setting that never took.
-  persistInput.addEventListener("change", () => {
-    const wanted = persistInput.checked
-    const revert = () => {
-      if (persistInput.isConnected) persistInput.checked = !wanted
-    }
-    try {
-      chrome.runtime
-        .sendMessage({ type: "set_persist_queue", persistQueue: wanted })
-        .then((response) => {
-          if (!response?.ok) revert()
-        })
-        .catch(revert)
-    } catch {
-      revert()
-    }
-  })
-
-  const persistToggle = h("label", {
-    attrs: {
-      class: "toggle",
-      "data-role": "persist",
-      title: "Queued annotations survive an agent restart, written under the runtime directory",
+  // A real button, not a span with a handler: the pill is draggable, and
+  // makeDraggable only steps aside for actual controls — anything else starts a
+  // drag on pointerdown and the click never lands.
+  const status = h(
+    "button",
+    {
+      attrs: {
+        class: "status",
+        type: "button",
+        "data-role": "label",
+        // Carries the full name too — it is ellipsised at 22ch, and the tooltip
+        // that used to show it lived on the span this replaced.
+        title: `${sessionLabel} — click to change session`,
+      },
+      on: { click: send("refresh_sessions") },
     },
-  }, [persistInput, h("span", { text: "Keep queue across restarts" })])
+    [h("span", { text: "Connected:" }), h("span", { text: sessionLabel, attrs: { class: "session" } })]
+  )
 
   root.replaceChildren(
     h("div", { attrs: { class: "surface pill" } }, [
       h("div", { attrs: { class: "pill-row" } }, [
         status,
         h("span", { attrs: { class: "spacer" } }),
+        h(
+          "button",
+          {
+            attrs: { class: "btn-icon", type: "button", "aria-label": "Settings", title: "Settings" },
+            on: { click: send("open_settings") },
+          },
+          [svgIcon(WRENCH_ICON_PATH, { viewBox: "0 0 24 24", size: 14, strokeWidth: 2.3 })]
+        ),
         h(
           "button",
           {
@@ -147,7 +176,7 @@ globalThis.__opc_renderPill = function renderPill(
             },
             on: { click: send("disconnect_tab") },
           },
-          [closeIcon()]
+          [svgIcon(CLOSE_ICON_PATH)]
         ),
       ]),
       h("div", { attrs: { class: "pill-row pill-row-actions" } }, [
@@ -164,7 +193,6 @@ globalThis.__opc_renderPill = function renderPill(
         h("span", { attrs: { class: "spacer" } }),
         globalThis.__opc_queueBadge!(queued),
       ]),
-      h("div", { attrs: { class: "pill-row pill-row-persist" } }, [persistToggle]),
     ])
   )
 
@@ -198,6 +226,37 @@ globalThis.__opc_setQueueBadge = function setQueueBadge(badge: HTMLElement, queu
   // Stays in the layout at zero; only the colour changes. Removing it resized
   // the pill on every transition through zero.
   badge.toggleAttribute("data-empty", queued < 1)
+}
+
+// Keys and focus aimed at one of our overlays, taken before the page can have
+// them. Sites with keyboard shortcuts or a modal focus trap listen on document
+// in the capture phase, which runs before anything inside our shadow tree: a
+// preventDefault there eats the keystroke, and a focus trap re-focuses its own
+// container the moment our textarea takes focus. Window capture runs ahead of
+// any document listener, so stopping the event there means the page never runs
+// its handler. The default action is untouched — stopPropagation does not
+// cancel it, so typing still lands in the textarea.
+//
+// ponytail: loses to a page that captures on window itself and registered
+// first (we inject after page load). An iframe-hosted composer is the only
+// full fix; do that if a real site turns up that still swallows keys.
+globalThis.__opc_shieldKeys = function shieldKeys(host: HTMLElement, onKeyDown?: (event: KeyboardEvent) => void) {
+  const types = ["keydown", "keypress", "keyup", "beforeinput", "input", "focusin", "focusout"]
+
+  function handle(event: Event) {
+    if (!host.isConnected) return
+    if (!event.composedPath().includes(host)) return
+    event.stopPropagation()
+    event.stopImmediatePropagation()
+    if (event.type === "keydown") onKeyDown?.(event as KeyboardEvent)
+  }
+
+  for (const type of types) window.addEventListener(type, handle, true)
+  return {
+    remove() {
+      for (const type of types) window.removeEventListener(type, handle, true)
+    },
+  }
 }
 
 const DRAG_MARGIN = 8

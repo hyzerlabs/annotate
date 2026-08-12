@@ -11,9 +11,10 @@ import {
   showToast,
 } from "./ui-overlays.js"
 import { showSessionPicker } from "./session-picker.js"
+import { showSettingsPanel } from "./settings-panel.js"
 import { runAnnotationPicker } from "./annotation-picker.js"
 import { captureElement, captureFullPage } from "./capture.js"
-import { CAPTURE_ELEMENT_PADDING_PX } from "./constants.js"
+import { CAPTURE_ELEMENT_PADDING_PX, OUTLINE_COLOR_KEY } from "./constants.js"
 import { createConnectionMonitor } from "./connection-monitor.js"
 import { createClaimsStore } from "./claims-store.js"
 import type {
@@ -22,6 +23,7 @@ import type {
   AnnotationScreenshot,
   ExtensionMessage,
   SessionInfo,
+  SettingsState,
   TabClaim,
 } from "./types.js"
 
@@ -36,6 +38,17 @@ const monitor = createConnectionMonitor({
   extensionVersion,
 })
 
+// Our own overlay hosts. Annotating one of these makes it the subject of the
+// screenshot, so the usual "hide our chrome before the shutter" rule inverts:
+// hiding it crops the empty page behind the thing being annotated, which is
+// how a comment on the pill came back as a black rectangle.
+const OVERLAY_HOST_IDS = [
+  "__opc_connection_overlay",
+  "__opc_settings_root",
+  "__opc_annotation_toast",
+  "__opc_annotation_root",
+]
+
 const MESSAGE_TYPE = {
   START_ANNOTATION: "start_annotation_from_overlay",
   START_CAPTURE: "start_capture_from_overlay",
@@ -44,7 +57,12 @@ const MESSAGE_TYPE = {
   REFRESH_SESSIONS: "refresh_sessions",
   OVERLAY_MOVED: "overlay_moved",
   SET_PERSIST_QUEUE: "set_persist_queue",
+  OPEN_SETTINGS: "open_settings",
+  OPEN_SHORTCUTS: "open_shortcuts",
+  SET_OUTLINE_COLOR: "set_outline_color",
 } as const
+
+const COMMAND_MODE: Record<string, AnnotationMode> = { annotate: "element", capture: "page" }
 
 function isSupportedMessage(message: unknown): message is ExtensionMessage {
   const type = typeof message === "object" && message !== null ? (message as { type?: unknown }).type : undefined
@@ -81,6 +99,22 @@ async function ensureSiteAccess(tab: chrome.tabs.Tab): Promise<void> {
   const granted = await chrome.permissions.request({ origins: [origin] })
   if (!granted) {
     throw new Error("Site access was denied for this page.")
+  }
+}
+
+async function settingsState(tabId: number): Promise<SettingsState> {
+  const commands = await chrome.commands.getAll().catch((): chrome.commands.Command[] => [])
+  const stored = await chrome.storage.local.get(OUTLINE_COLOR_KEY)
+  return {
+    persistQueue: claimedTabs.get(tabId)?.persistQueue === true,
+    outlineColor: typeof stored[OUTLINE_COLOR_KEY] === "string" ? stored[OUTLINE_COLOR_KEY] : null,
+    shortcuts: commands
+      .filter((command) => command.name && command.name in COMMAND_MODE)
+      .map((command) => ({
+        name: command.name!,
+        label: command.description || command.name!,
+        shortcut: command.shortcut || "",
+      })),
   }
 }
 
@@ -126,6 +160,27 @@ async function runMessageAction(message: ExtensionMessage, tab: chrome.tabs.Tab)
     await syncTabsOnServer(claim.baseUrl, { persistQueue: message.persistQueue })
     logExtension("Queue persistence changed", { baseUrl: claim.baseUrl, persistQueue: message.persistQueue })
     return { ok: true, persistQueue: message.persistQueue }
+  }
+
+  if (message.type === "open_settings") {
+    if (!tab.id) throw new Error("No active tab found")
+    await showSettingsPanel(tab.id, await settingsState(tab.id))
+    return { ok: true }
+  }
+
+  if (message.type === "set_outline_color") {
+    // Removed rather than stored as null, so "unset" is the absence of a value
+    // and the highlight falls back to the theme token.
+    if (message.color) await chrome.storage.local.set({ [OUTLINE_COLOR_KEY]: message.color })
+    else await chrome.storage.local.remove(OUTLINE_COLOR_KEY)
+    return { ok: true }
+  }
+
+  if (message.type === "open_shortcuts") {
+    // Only Chrome can rebind an extension command, on its own page — a panel
+    // that recorded keystrokes would have nowhere to put them.
+    await chrome.tabs.create({ url: "chrome://extensions/shortcuts" })
+    return { ok: true }
   }
 
   if (message.type === "refresh_sessions") {
@@ -283,7 +338,8 @@ async function startAnnotationMode(
               bottom: picked.element.rect.y + picked.element.rect.height + CAPTURE_ELEMENT_PADDING_PX,
             }
           : null
-      pillHidden = await hideOverlayForCapture(tab.id, captureRegion)
+      const annotatingOurOverlay = !!picked.element?.id && OVERLAY_HOST_IDS.includes(picked.element.id)
+      pillHidden = annotatingOurOverlay ? false : await hideOverlayForCapture(tab.id, captureRegion)
       try {
         screenshot =
           mode === "page" || !picked.element
@@ -430,6 +486,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     })
 
   return true
+})
+
+chrome.commands.onCommand.addListener(async (command) => {
+  const mode = COMMAND_MODE[command]
+  if (!mode) return
+
+  try {
+    const tab = await getActiveTab()
+    // The pill's buttons cannot be pressed on an unconnected tab; a shortcut can,
+    // so the check the UI used to make implicitly has to be made here.
+    if (!claimedTabs.get(tab?.id)) {
+      throw new Error("This tab is not connected to an agent session. Click the extension icon to connect it.")
+    }
+    await startAnnotationMode(tab, mode)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    warnExtension("Shortcut failed", { command, error: message })
+    const tab = await getActiveTab().catch((): null => null)
+    if (tab?.id) await showAnnotationError(tab.id, message).catch(() => {})
+  }
 })
 
 chrome.action.onClicked.addListener(async (clickedTab) => {

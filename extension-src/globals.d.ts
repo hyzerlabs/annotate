@@ -29,16 +29,24 @@ declare global {
         host: HTMLElement,
         sessionLabel: string,
         queued: number,
-        persistQueue: boolean,
         position?: OpcPosition | null
       ) => void)
     | undefined
+  type OpcIconOptions = { viewBox?: string; size?: number; strokeWidth?: number }
+
+  var __opc_svgIcon: ((d: string, options?: OpcIconOptions) => SVGSVGElement) | undefined
   var __opc_anchorTo:
     | ((trigger: Element, floating: HTMLElement) => OpcPosition & { side: "top" | "bottom" })
     | undefined
   var __opc_queueBadge: ((queued: number) => HTMLElement) | undefined
   var __opc_setQueueBadge: ((badge: HTMLElement, queued: number) => void) | undefined
-  var __opc_cleanupSessionPicker: (() => void) | undefined
+  var __opc_shieldKeys:
+    | ((host: HTMLElement, onKeyDown?: (event: KeyboardEvent) => void) => { remove(): void })
+    | undefined
+  /** Tears down whichever panel is currently expanded over the pill. */
+  var __opc_cleanupPanel: (() => void) | undefined
+  /** Same, for the settings popup, which floats beside the pill instead. */
+  var __opc_cleanupSettings: (() => void) | undefined
 
   interface HTMLElement {
     __opcDragApi?: OpcDragApi

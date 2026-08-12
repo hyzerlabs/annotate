@@ -97,6 +97,16 @@ export type AnnotationPayload = {
   screenshot: AnnotationScreenshot | null
 }
 
+/** What the settings panel renders. Gathered by the background, which is the
+ * only side that can read chrome.commands and extension storage. */
+export type SettingsState = {
+  persistQueue: boolean
+  /** One entry per manifest command, with whatever key Chrome currently has bound. */
+  shortcuts: { name: string; label: string; shortcut: string }[]
+  /** null means "follow the theme", which is what an untouched install does. */
+  outlineColor: string | null
+}
+
 export type ExtensionMessage =
   | { type: "start_annotation_from_overlay" }
   | { type: "start_capture_from_overlay" }
@@ -105,6 +115,9 @@ export type ExtensionMessage =
   | { type: "refresh_sessions" }
   | { type: "overlay_moved"; position: OverlayPosition }
   | { type: "set_persist_queue"; persistQueue: boolean }
+  | { type: "open_settings" }
+  | { type: "open_shortcuts" }
+  | { type: "set_outline_color"; color: string | null }
 
 export type InstanceStatus = {
   app?: string

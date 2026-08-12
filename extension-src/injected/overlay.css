@@ -78,12 +78,6 @@
 	gap: 5px;
 }
 
-.pill-row-persist {
-	margin-top: 1px;
-	padding-top: 6px;
-	border-top: 1px solid var(--opc-hairline);
-}
-
 .spacer {
 	flex: 1 1 auto;
 }
@@ -192,12 +186,23 @@ button:disabled {
 
 /* ── pill ─────────────────────────────────────────────────────────────── */
 
+/* Reads as a label until you point at it — the click target is the whole
+ * "Connected: name" phrase, which is what people aim at to switch sessions. The
+ * negative margin keeps the status dot where it sat before the padding. */
 .status {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--hz-space-near);
 	min-width: 0;
+	margin: -3px -7px;
+	padding: 3px 7px;
+	border-radius: var(--hz-radius-sm);
 	color: var(--hz-color-text-muted);
+	text-align: left;
+}
+
+.status:hover {
+	background: var(--opc-hover);
 }
 
 .status::before {
@@ -317,14 +322,108 @@ button:disabled {
 	margin-bottom: 2px;
 }
 
+/* ── settings ─────────────────────────────────────────────────────────── */
+
+/* Floats beside the pill in its own dock host — that host is the positioned,
+ * draggable box, so this is only the surface inside it. */
+.settings {
+	width: min(320px, calc(100vw - 24px));
+}
+
+/* Full width so the label and its control sit at opposite edges — .toggle is
+ * inline-flex for the composer, where it shares a row with the buttons. */
+.setting-row {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--hz-space-near);
+	padding: 6px 0;
+	margin-right: 0;
+	color: var(--hz-color-text-muted);
+	font-size: 0.75rem;
+}
+
+.settings-footer {
+	margin-top: var(--hz-space-near);
+	padding-top: var(--hz-space-near);
+	border-top: 1px solid var(--opc-hairline);
+	font-size: 0.75rem;
+}
+
+.settings-footer a {
+	color: var(--hz-color-text);
+	text-decoration: none;
+}
+
+.settings-footer a:hover {
+	text-decoration: underline;
+}
+
+.setting-controls {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--hz-space-near);
+}
+
+/* The swatch is the control, so the browser's default chrome around it is just
+ * a border that does not match anything else here. */
+.setting-controls input[type='color'] {
+	width: 28px;
+	height: 20px;
+	padding: 0;
+	border: 1px solid var(--opc-hairline);
+	border-radius: var(--hz-radius-sm);
+	background: none;
+	cursor: pointer;
+}
+
+.setting-controls input[type='color']::-webkit-color-swatch-wrapper {
+	padding: 2px;
+}
+
+.setting-controls input[type='color']::-webkit-color-swatch {
+	border: none;
+	border-radius: 2px;
+}
+
+/* Modifier glyphs are dense and small; the min-width also lines the two chips
+ * up with each other so the labels beside them start at the same x. */
+.kbd {
+	min-width: 3.4em;
+	padding: 3px 9px;
+	border: 1px solid var(--opc-hairline);
+	border-radius: var(--hz-radius-sm);
+	color: var(--hz-color-text);
+	font-family: var(--hz-font-family-mono, ui-monospace, monospace);
+	font-size: 0.8125rem;
+	letter-spacing: 0.04em;
+	text-align: center;
+	white-space: nowrap;
+}
+
+.kbd-unset {
+	border-style: dashed;
+	color: var(--hz-color-text-muted);
+}
+
+/* The binding sits in front of its label and the pair reads as one phrase, so
+ * this row groups left instead of pushing label and control apart. */
+.setting-row-inline {
+	justify-content: flex-start;
+}
+
 /* ── annotation picker ────────────────────────────────────────────────── */
 
+/* --opc-outline is set on the host by the picker when the user has chosen a
+ * colour in settings; unset it falls back to the theme, which follows light and
+ * dark. Only this box reads it — the pill and composer stay on the token. */
 .highlight {
 	position: fixed;
 	pointer-events: none;
-	border: 2px solid var(--hz-intent-primary);
+	border: 2px solid var(--opc-outline, var(--hz-intent-primary));
 	border-radius: var(--hz-radius-sm);
-	background: color-mix(in srgb, var(--hz-intent-primary) 12%, transparent);
+	background: color-mix(in srgb, var(--opc-outline, var(--hz-intent-primary)) 12%, transparent);
 	box-shadow: 0 0 0 1px color-mix(in srgb, var(--hz-color-surface) 60%, transparent);
 	/* Only opacity — transitioning geometry makes the box lag the cursor. */
 	transition: opacity 160ms var(--hz-ease-out);
