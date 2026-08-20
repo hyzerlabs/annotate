@@ -1,8 +1,12 @@
-import { OUTLINE_COLOR_KEY } from "./constants.js"
+import { DRAFT_COMMENT_KEY, OUTLINE_COLOR_KEY } from "./constants.js"
 import { logExtension, warnExtension } from "./logger.js"
 import type { AnnotationElement, AnnotationMode, AnnotationPickerResult, AnnotationViewport } from "./types.js"
 
-function annotationPickerScript(mode: AnnotationMode, outlineColor: string | null): Promise<AnnotationPickerResult> {
+function annotationPickerScript(
+  mode: AnnotationMode,
+  outlineColor: string | null,
+  draft: string
+): Promise<AnnotationPickerResult> {
   const h = globalThis.__opc_h!
   const shadow = globalThis.__opc_shadow!
   const makeDraggable = globalThis.__opc_makeDraggable!
@@ -114,6 +118,9 @@ function annotationPickerScript(mode: AnnotationMode, outlineColor: string | nul
       on: { click: () => targetInfo.classList.toggle("expanded") },
     })
     const textarea = h("textarea") as HTMLTextAreaElement
+    // Whatever the last failed send was carrying. focus() drops the caret at
+    // the end of it, so the user carries on typing rather than editing.
+    textarea.value = draft
     textarea.placeholder =
       mode === "page" ? "What should the agent know about this page?" : "What should the agent know?"
 
@@ -316,10 +323,15 @@ export async function runAnnotationPicker(tabId: number, mode: AnnotationMode): 
     files: ["injected/dom.js"],
   })
   const stored = await chrome.storage.local.get(OUTLINE_COLOR_KEY)
+  const held = await chrome.storage.session.get(DRAFT_COMMENT_KEY)
   const result = await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
-    args: [mode, typeof stored[OUTLINE_COLOR_KEY] === "string" ? stored[OUTLINE_COLOR_KEY] : null],
+    args: [
+      mode,
+      typeof stored[OUTLINE_COLOR_KEY] === "string" ? stored[OUTLINE_COLOR_KEY] : null,
+      typeof held[DRAFT_COMMENT_KEY] === "string" ? held[DRAFT_COMMENT_KEY] : "",
+    ],
     func: annotationPickerScript,
   })
 

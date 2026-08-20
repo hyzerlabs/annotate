@@ -14,7 +14,7 @@ import { showSessionPicker } from "./session-picker.js"
 import { showSettingsPanel } from "./settings-panel.js"
 import { runAnnotationPicker } from "./annotation-picker.js"
 import { captureElement, captureFullPage } from "./capture.js"
-import { CAPTURE_ELEMENT_PADDING_PX, OUTLINE_COLOR_KEY } from "./constants.js"
+import { CAPTURE_ELEMENT_PADDING_PX, DRAFT_COMMENT_KEY, OUTLINE_COLOR_KEY } from "./constants.js"
 import { createConnectionMonitor } from "./connection-monitor.js"
 import { createClaimsStore } from "./claims-store.js"
 import type {
@@ -423,7 +423,16 @@ async function startAnnotationMode(
       )
     }
 
+    // Delivered, so the held draft is spent. Only a success clears it: a cancel
+    // after a failed send is not the user saying "throw my typing away".
+    await chrome.storage.session.remove(DRAFT_COMMENT_KEY).catch(() => {})
+
     return { cancelled: false }
+  } catch (error) {
+    // The send died with the user's comment inside it. Hold it for the next
+    // composer rather than making them retype it at whatever caused this.
+    if (picked.comment) await chrome.storage.session.set({ [DRAFT_COMMENT_KEY]: picked.comment }).catch(() => {})
+    throw error
   } finally {
     // Idempotent, so this is a no-op on the success path. It exists so that no
     // failure between hiding the pill and showing the toast can leave the pill

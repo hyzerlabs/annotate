@@ -251,10 +251,29 @@ globalThis.__opc_shieldKeys = function shieldKeys(host: HTMLElement, onKeyDown?:
     if (event.type === "keydown") onKeyDown?.(event as KeyboardEvent)
   }
 
+  // Focus is a default action of pointerdown, so a page that calls
+  // preventDefault on it — or steals focus in its own handler — leaves the
+  // buttons working (a click still fires) and every field dead. Nothing above
+  // helps: stopPropagation does not restore a cancelled default. Focus is
+  // taken here instead, imperatively and ahead of the page, on the way down and
+  // again on the way up in case the page grabbed it back in between. A later
+  // preventDefault cannot undo it, and re-focusing what is already focused is a
+  // no-op, so healthy pages are untouched. Propagation is deliberately left
+  // alone: killing it here would stop our own controls seeing their own clicks.
+  function takeFocus(event: Event) {
+    if (!host.isConnected) return
+    const target = event.composedPath()[0]
+    if (target instanceof HTMLElement && target.matches("input, textarea, select")) target.focus()
+  }
+
+  const pointerTypes = ["pointerdown", "pointerup"]
+
   for (const type of types) window.addEventListener(type, handle, true)
+  for (const type of pointerTypes) window.addEventListener(type, takeFocus, true)
   return {
     remove() {
       for (const type of types) window.removeEventListener(type, handle, true)
+      for (const type of pointerTypes) window.removeEventListener(type, takeFocus, true)
     },
   }
 }

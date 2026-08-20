@@ -14,3 +14,8 @@ export const CAPTURE_MAX_BANDS = 12
 
 // chrome.storage.local: a browser-side preference, not part of any agent session.
 export const OUTLINE_COLOR_KEY = "outlineColor"
+
+// chrome.storage.session: the comment from a send that failed, held for the next
+// composer so a server that was down does not cost the user their typing.
+// Session rather than local — it should not outlive the browser.
+export const DRAFT_COMMENT_KEY = "draftComment"
